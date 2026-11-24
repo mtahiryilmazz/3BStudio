@@ -59,6 +59,7 @@ import {
   repairMesh,
   rotateMesh90,
   scaleToDimension,
+  subdivideGeometry,
   simplifyMesh,
   taubinSmooth,
   voxelRemesh,
@@ -73,6 +74,7 @@ import { QrPairingModal } from './components/QrPairingModal';
 import { MobileScannerView } from './components/MobileScannerView';
 import { CharacterSheetModal, type CharacterSheetApplyItem } from './components/CharacterSheetModal';
 import { PhotoBoothModal, type PhotoBoothResult } from './components/PhotoBoothModal';
+import { paintHeadFromFace } from './engine/faceDetect';
 
 const INITIAL_VIEWS: PhotoViewItem[] = [
   { angle: 'front', label: 'Ön (0°)', originalDataUrl: '', cleanedDataUrl: null, mask: null, tolerance: 34 },
@@ -223,6 +225,8 @@ function DesktopStudio() {
   const [qrOpen, setQrOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [boothOpen, setBoothOpen] = useState(false);
+  /** Karakter sheet'inden otomatik kırpılan yüz yakın çekimi (tam çözünürlük). */
+  const [faceCloseUp, setFaceCloseUp] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [syncedFromPhone, setSyncedFromPhone] = useState<Record<string, string>>({});
   const [hasSyncedPly, setHasSyncedPly] = useState(false);
@@ -247,7 +251,7 @@ function DesktopStudio() {
   }, []);
 
   // Karakter sheet dilimlerini ilgili açı slotlarına yazar; temizlenmiş veri ve maske geçersizleşir.
-  const handleSheetApply = useCallback((items: CharacterSheetApplyItem[]) => {
+  const handleSheetApply = useCallback((items: CharacterSheetApplyItem[], faceDataUrl: string | null) => {
     if (items.length === 0) return;
     setViews((prev) => {
       const next = prev.map((v) => ({ ...v }));
@@ -260,7 +264,12 @@ function DesktopStudio() {
       }
       return next;
     });
-    showToast('ok', `Karakter sheet'ten ${items.length} görünüm yüklendi.`);
+    if (faceDataUrl) {
+      setFaceCloseUp(faceDataUrl);
+      showToast('ok', `Karakter sheet'ten ${items.length} görünüm ve yüz yakın çekimi yüklendi.`);
+    } else {
+      showToast('ok', `Karakter sheet'ten ${items.length} görünüm yüklendi.`);
+    }
   }, [showToast]);
 
   const commitGeometry = useCallback((nextGeo: THREE.BufferGeometry, pushHistory = true) => {
@@ -588,6 +597,18 @@ function DesktopStudio() {
 
       const repaired = repairMesh(nextGeo);
       nextGeo.dispose();
+
+      // Karakter sheet'inden gelen yüz yakın çekimi varsa kafa bölgesine renk bindir.
+      if (faceCloseUp) {
+        try {
+          setBusyLabel('Yüz detayı kafa bölgesine bindiriliyor...');
+          const faceImg = await dataUrlToImageData(faceCloseUp, 768);
+          paintHeadFromFace(repaired, faceImg);
+        } catch {
+          // Yüz bindirme başarısız olsa da model kullanılabilir kalır.
+        }
+      }
+
       commitGeometry(repaired);
       showToast('ok', 'Su geçirmez (manifold) 3D model oluşturuldu ve yazıcı tablasına oturtuldu!');
     } catch (err) {
@@ -915,6 +936,30 @@ function DesktopStudio() {
             Fotogrametri Kabini (8-16 Poz)
           </button>
 
+          {/* Karakter sheet'inden otomatik algılanan yüz detayı */}
+          {faceCloseUp && (
+            <div className="rounded-xl border border-cyan-700/50 bg-slate-950/70 p-2 flex items-center gap-2">
+              <img
+                src={faceCloseUp}
+                alt="Yüz yakın çekim"
+                className="w-12 h-12 rounded-lg object-cover border border-slate-800 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-semibold text-cyan-200">Yüz detayı hazır</div>
+                <div className="text-[9px] text-slate-500 leading-snug">
+                  Otomatik kırpıldı; model üretiminde kafa bölgesine renk olarak bindirilir.
+                </div>
+              </div>
+              <button
+                onClick={() => setFaceCloseUp(null)}
+                className="text-slate-500 hover:text-rose-400"
+                title="Yüz detayını kaldır"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* 5 Angle Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2">
             {views.map((item) => (
@@ -1097,7 +1142,7 @@ function DesktopStudio() {
                       <input
                         type="range"
                         min={36}
-                        max={96}
+                        max={160}
                         step={8}
                         value={hullResolution}
                         onChange={(e) => setHullResolution(Number(e.target.value))}
@@ -1526,6 +1571,24 @@ function DesktopStudio() {
             >
               Yüzeyi Yumuşat (Hacim Korumalı)
             </button>
+
+            {/* Poligon artırma: orta-nokta alt bölme (×4 / ×16) */}
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                disabled={!geometry || isBusy}
+                onClick={() => runMeshOp('Poligon Artır ×4', (g) => subdivideGeometry(g, 1))}
+                className="py-1.5 px-2 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/35 disabled:opacity-40 text-[11px] text-violet-200 flex items-center justify-center gap-1"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-violet-400" /> Poligon ×4
+              </button>
+              <button
+                disabled={!geometry || isBusy}
+                onClick={() => runMeshOp('Poligon Artır ×16', (g) => subdivideGeometry(g, 2))}
+                className="py-1.5 px-2 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/35 disabled:opacity-40 text-[11px] text-violet-200 flex items-center justify-center gap-1"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-violet-400" /> Poligon ×16
+              </button>
+            </div>
 
             <div className="pt-1 border-t border-slate-800/80 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] text-slate-400">

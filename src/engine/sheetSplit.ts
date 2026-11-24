@@ -6,13 +6,14 @@
  * düz arka plan şeritleriyle ayrılır. Saf piksel matematiği; DOM yok.
  */
 
+import { detectFaceRegion } from './faceDetect';
+
 export interface SheetSlice {
   x: number;
   y: number;
   width: number;
   height: number;
 }
-
 export interface SheetSplitOptions {
   /** Gutter sayılan sütunda figür pikseli eşiği (0..1; sütundaki "figür oranı" bunun altındaysa boş sayılır). */
   figureRatioThreshold?: number;
@@ -135,4 +136,194 @@ export function cropImageData(data: ImageData, slice: SheetSlice): ImageData {
 export function suggestSliceAngles(count: number): Array<'front' | 'right' | 'back' | 'left' | 'top'> {
   const order: Array<'front' | 'right' | 'back' | 'left' | 'top'> = ['front', 'right', 'back', 'left', 'top'];
   return Array.from({ length: count }, (_, i) => order[Math.min(i, order.length - 1)]);
+}
+
+/* ------------------------------------------------------------------ *
+ * 2B ızgara düzeni: çok satırlı sheet'ler (tam boy + yüz panelleri)
+ * ------------------------------------------------------------------ */
+
+export type SheetCellKind = 'figure' | 'face';
+
+export interface SheetCell extends SheetSlice {
+  /** 'figure' = tam boy/nesne görünümü, 'face' = yüz yakın çekimi. */
+  kind: SheetCellKind;
+  /** Yüz ise algılama güveni (0..1); figure için 0. */
+  faceConfidence: number;
+  /** Hücrenin satır bandı indeksi (üstten 0). */
+  row: number;
+}
+
+export interface SheetLayout {
+  cells: SheetCell[];
+  rows: number;
+  /** Arka plan rengi (teşhis için). */
+  background: [number, number, number];
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+/** Kenar piksellerinin medyanından arka plan rengini tahmin eder. */
+function estimateBackground(data: ImageData): [number, number, number] {
+  const { width, height, data: px } = data;
+  const rs: number[] = [];
+  const gs: number[] = [];
+  const bs: number[] = [];
+  const step = Math.max(1, Math.floor(Math.max(width, height) / 64));
+  for (let x = 0; x < width; x += step) {
+    for (const y of [0, 1, height - 2, height - 1]) {
+      const i = (y * width + x) * 4;
+      rs.push(px[i]);
+      gs.push(px[i + 1]);
+      bs.push(px[i + 2]);
+    }
+  }
+  for (let y = 0; y < height; y += step) {
+    for (const x of [0, 1, width - 2, width - 1]) {
+      const i = (y * width + x) * 4;
+      rs.push(px[i]);
+      gs.push(px[i + 1]);
+      bs.push(px[i + 2]);
+    }
+  }
+  return [median(rs), median(gs), median(bs)];
+}
+
+function foregroundMask(data: ImageData, bg: [number, number, number]): Uint8Array {
+  const { width, height, data: px } = data;
+  const mask = new Uint8Array(width * height);
+  const threshold = 26;
+  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
+    if (px[i + 3] < 100) continue;
+    const d = Math.abs(px[i] - bg[0]) + Math.abs(px[i + 1] - bg[1]) + Math.abs(px[i + 2] - bg[2]);
+    if (d > threshold) mask[p] = 1;
+  }
+  return mask;
+}
+
+interface Span {
+  start: number;
+  end: number;
+}
+
+/** Verilen eksende boş olmayan (içerikli) bantları döndürür. */
+function contentSpans(counts: Int32Array, length: number, gutterMax: number): Span[] {
+  const spans: Span[] = [];
+  let start = -1;
+  for (let i = 0; i < length; i++) {
+    const hasContent = counts[i] > gutterMax;
+    if (hasContent && start === -1) start = i;
+    if ((!hasContent || i === length - 1) && start !== -1) {
+      spans.push({ start, end: hasContent ? i : i - 1 });
+      start = -1;
+    }
+  }
+  return spans;
+}
+
+/**
+ * Çok satırlı/çok kolonlu karakter sheet'lerini 2B olarak böler.
+ *
+ * 1) Arka plan rengi kenarlardan tahmin edilir, ön plan maskesi çıkarılır.
+ * 2) Yatay boş satırlardan satır bantları bulunur.
+ * 3) Her bantta dikey boşluklardan hücreler ayrılır ve içeriğe göre daraltılır.
+ * 4) Kare/portre oranlı ve yüz içeren hücreler 'face', ince-uzun hücreler 'figure'.
+ */
+export function detectSheetLayout(data: ImageData, options: SheetSplitOptions = {}): SheetLayout {
+  const minSliceRatio = options.minSliceRatio ?? DEFAULT_MIN_SLICE;
+  const maxSlices = options.maxSlices ?? 24;
+  const { width, height } = data;
+  const bg = estimateBackground(data);
+  const mask = foregroundMask(data, bg);
+
+  const rowCounts = new Int32Array(height);
+  for (let y = 0; y < height; y++) {
+    let c = 0;
+    const base = y * width;
+    for (let x = 0; x < width; x++) c += mask[base + x];
+    rowCounts[y] = c;
+  }
+
+  const rowGutterMax = Math.max(1, Math.floor(width * 0.004));
+  const bands = contentSpans(rowCounts, height, rowGutterMax).filter(
+    (b) => b.end - b.start + 1 >= Math.max(6, Math.floor(height * 0.03))
+  );
+
+  const cells: SheetCell[] = [];
+  const minCellW = Math.max(8, Math.floor(width * minSliceRatio * 0.6));
+
+  bands.forEach((band, rowIndex) => {
+    const bandH = band.end - band.start + 1;
+    const colCounts = new Int32Array(width);
+    for (let y = band.start; y <= band.end; y++) {
+      const base = y * width;
+      for (let x = 0; x < width; x++) colCounts[x] += mask[base + x];
+    }
+
+    const colGutterMax = Math.max(1, Math.floor(bandH * 0.004));
+    const columns = contentSpans(colCounts, width, colGutterMax);
+
+    for (const col of columns) {
+      if (col.end - col.start + 1 < minCellW) continue;
+
+      // Hücreyi içeriğe göre daralt.
+      let minX = width;
+      let maxX = -1;
+      let minY = height;
+      let maxY = -1;
+      let area = 0;
+      for (let y = band.start; y <= band.end; y++) {
+        const base = y * width;
+        for (let x = col.start; x <= col.end; x++) {
+          if (!mask[base + x]) continue;
+          area++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (maxX < 0 || area < width * height * 0.002) continue;
+
+      const cw = maxX - minX + 1;
+      const ch = maxY - minY + 1;
+      const padX = Math.round(cw * 0.03);
+      const padY = Math.round(ch * 0.03);
+      const x = Math.max(0, minX - padX);
+      const y = Math.max(0, minY - padY);
+      const w = Math.min(width, maxX + padX) - x;
+      const h = Math.min(height, maxY + padY) - y;
+
+      const crop = cropImageData(data, { x, y, width: w, height: h });
+      const aspect = h / Math.max(1, w);
+      const face = detectFaceRegion(crop);
+      const isFace = Boolean(face && face.confidence >= 0.2 && aspect < 1.7);
+
+      cells.push({
+        x,
+        y,
+        width: w,
+        height: h,
+        kind: isFace ? 'face' : 'figure',
+        faceConfidence: isFace && face ? face.confidence : 0,
+        row: rowIndex,
+      });
+    }
+  });
+
+  const limited = cells.slice(0, Math.max(1, maxSlices));
+  if (limited.length === 0) {
+    return {
+      cells: [
+        { x: 0, y: 0, width, height, kind: 'figure', faceConfidence: 0, row: 0 },
+      ],
+      rows: 1,
+      background: bg,
+    };
+  }
+
+  return { cells: limited, rows: bands.length, background: bg };
 }

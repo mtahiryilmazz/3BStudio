@@ -648,3 +648,110 @@ export function flatCutBottom(
   clipped.dispose();
   return placeOnBuildPlate(repaired);
 }
+
+/**
+ * Üçgen sayısını 4^iterations katına çıkarır (orta-nokta alt bölme).
+ *
+ * Her üçgen dört alt üçgene bölünür; var olan `color` attribute'u ara
+ * değerlerle korunur (yüz detayı kaybolmaz). Baskı kalitesini artırmak için
+ * kullanılır: 1 geçiş ×4, 2 geçiş ×16 poligon.
+ */
+export function subdivideGeometry(
+  geometry: THREE.BufferGeometry,
+  iterations = 1
+): THREE.BufferGeometry {
+  const passes = Math.max(0, Math.min(3, Math.round(iterations)));
+  let geo = geometry.clone();
+  if (geo.getIndex()) {
+    const nonIndexed = geo.toNonIndexed();
+    geo.dispose();
+    geo = nonIndexed;
+  }
+  if (passes === 0) return geo;
+
+  for (let pass = 0; pass < passes; pass++) {
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const colorAttr = geo.getAttribute('color') as THREE.BufferAttribute | undefined;
+    const triCount = Math.floor(pos.count / 3);
+    const nextPos = new Float32Array(triCount * 12 * 3);
+    const nextCol = colorAttr ? new Float32Array(triCount * 12 * 3) : null;
+
+    const readPoint = (i: number, target: THREE.Vector3) => {
+      target.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+    };
+    const readColor = (i: number, target: THREE.Color) => {
+      if (!colorAttr) target.setRGB(0.72, 0.75, 0.8);
+      else target.setRGB(colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i));
+    };
+
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const tmp = new THREE.Vector3();
+    const cA = new THREE.Color();
+    const cB = new THREE.Color();
+    const cC = new THREE.Color();
+    const cTmp = new THREE.Color();
+
+    let vp = 0;
+    let cp = 0;
+    const emit = (p: THREE.Vector3, color?: THREE.Color) => {
+      nextPos[vp++] = p.x;
+      nextPos[vp++] = p.y;
+      nextPos[vp++] = p.z;
+      if (nextCol) {
+        const col = color ?? cTmp.setRGB(0.72, 0.75, 0.8);
+        nextCol[cp++] = col.r;
+        nextCol[cp++] = col.g;
+        nextCol[cp++] = col.b;
+      }
+    };
+
+    for (let t = 0; t < triCount; t++) {
+      const i0 = t * 3;
+      const i1 = i0 + 1;
+      const i2 = i0 + 2;
+      readPoint(i0, a);
+      readPoint(i1, b);
+      readPoint(i2, c);
+      readColor(i0, cA);
+      readColor(i1, cB);
+      readColor(i2, cC);
+
+      const ab = tmp.copy(a).add(b).multiplyScalar(0.5).clone();
+      const bc = tmp.copy(b).add(c).multiplyScalar(0.5).clone();
+      const ca = tmp.copy(c).add(a).multiplyScalar(0.5).clone();
+      const cAB = cA.clone().add(cB).multiplyScalar(0.5);
+      const cBC = cB.clone().add(cC).multiplyScalar(0.5);
+      const cCA = cC.clone().add(cA).multiplyScalar(0.5);
+
+      // 1) a, ab, ca
+      emit(a, cA);
+      emit(ab, cAB);
+      emit(ca, cCA);
+      // 2) ab, b, bc
+      emit(ab, cAB);
+      emit(b, cB);
+      emit(bc, cBC);
+      // 3) ca, bc, c
+      emit(ca, cCA);
+      emit(bc, cBC);
+      emit(c, cC);
+      // 4) ab, bc, ca (orta)
+      emit(ab, cAB);
+      emit(bc, cBC);
+      emit(ca, cCA);
+    }
+
+    const next = new THREE.BufferGeometry();
+    next.setAttribute('position', new THREE.BufferAttribute(nextPos, 3));
+    if (nextCol) next.setAttribute('color', new THREE.BufferAttribute(nextCol, 3));
+    geo.dispose();
+    geo = next;
+  }
+
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
+}

@@ -131,7 +131,7 @@ export function carvePhotoBooth(
     throw new Error('Fotogrametri kabini için en az 2 farklı açıdan temizlenmiş silüet gerekli.');
   }
 
-  const resolution = Math.max(32, Math.min(160, Math.round(options.resolution ?? 96)));
+  const resolution = Math.max(32, Math.min(192, Math.round(options.resolution ?? 96)));
   const smoothPasses = Math.max(0, Math.min(6, Math.round(options.smoothPasses ?? 2)));
   const sizeMm = Math.max(5, options.sizeMm ?? 180);
 

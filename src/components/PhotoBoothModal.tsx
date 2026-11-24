@@ -32,7 +32,7 @@ interface BoothSlot {
 }
 
 const PLAN_OPTIONS = [8, 12, 16];
-const RESOLUTION_OPTIONS = [64, 96, 128];
+const RESOLUTION_OPTIONS = [64, 96, 128, 160];
 
 function makeSlots(count: number, previous: BoothSlot[]): BoothSlot[] {
   const plan = buildBoothPlan(count);

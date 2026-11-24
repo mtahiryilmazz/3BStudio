@@ -72,7 +72,7 @@ export function reconstructVisualHull(
   views: Partial<Record<ViewAngle, BinaryMask>>,
   options: VisualHullOptions = {}
 ): THREE.BufferGeometry {
-  const resolution = Math.max(24, Math.min(128, Math.round(options.resolution ?? 64)));
+  const resolution = Math.max(24, Math.min(176, Math.round(options.resolution ?? 64)));
   const smoothPasses = Math.max(0, Math.min(6, Math.round(options.smoothPasses ?? 2)));
   const sizeMm = Math.max(5, options.sizeMm ?? 60);
 
