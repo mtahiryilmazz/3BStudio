@@ -243,6 +243,8 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
         roughness: 0.38,
         metalness: 0.15,
         flatShading: false,
+        // Fotogrametri kabini çıktısında vertex renkleri varsa göster.
+        vertexColors: Boolean(geometry.getAttribute('color')),
       });
     }
 

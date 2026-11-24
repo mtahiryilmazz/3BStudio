@@ -204,7 +204,12 @@ export function exportGLB(geometry: THREE.BufferGeometry): Promise<ArrayBuffer> 
     const exporter = new GLTFExporter();
     const mesh = new THREE.Mesh(
       geometry,
-      new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.45, metalness: 0.1 })
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        roughness: 0.45,
+        metalness: 0.1,
+        vertexColors: geometry.hasAttribute('color'),
+      })
     );
     exporter.parse(
       mesh,

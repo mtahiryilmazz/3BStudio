@@ -72,6 +72,7 @@ import { MaskEditorModal } from './components/MaskEditorModal';
 import { QrPairingModal } from './components/QrPairingModal';
 import { MobileScannerView } from './components/MobileScannerView';
 import { CharacterSheetModal, type CharacterSheetApplyItem } from './components/CharacterSheetModal';
+import { PhotoBoothModal, type PhotoBoothResult } from './components/PhotoBoothModal';
 
 const INITIAL_VIEWS: PhotoViewItem[] = [
   { angle: 'front', label: 'Ön (0°)', originalDataUrl: '', cleanedDataUrl: null, mask: null, tolerance: 34 },
@@ -221,6 +222,7 @@ function DesktopStudio() {
   const [demoMenuOpen, setDemoMenuOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [boothOpen, setBoothOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [syncedFromPhone, setSyncedFromPhone] = useState<Record<string, string>>({});
   const [hasSyncedPly, setHasSyncedPly] = useState(false);
@@ -276,6 +278,22 @@ function DesktopStudio() {
       return null;
     });
   }, []);
+
+  // Fotogrametri kabini çıktısını doğrudan baskı/önizleme hattına alır.
+  const handleBoothGenerated = useCallback(
+    (result: PhotoBoothResult) => {
+      commitGeometry(result.geometry);
+      setDisplayMode('solid');
+      const vertexCount = result.geometry.getAttribute('position').count;
+      showToast(
+        'ok',
+        `Fotogrametri kabini: ${result.viewCount} pozdan ${vertexCount.toLocaleString('tr-TR')} vertex'lik model üretildi${
+          result.colored ? ' (fotoğraftan renk bindirildi)' : ''
+        }.`
+      );
+    },
+    [commitGeometry, showToast]
+  );
 
   // ---- Rig & Animasyon (Oyun Modu) ----
   const handleCreateRig = () => {
@@ -886,6 +904,15 @@ function DesktopStudio() {
           >
             <Layers className="w-3.5 h-3.5 text-violet-300" />
             Karakter Sheet'ten Yükle
+          </button>
+
+          {/* Fotogrametri Kabini: 8-16 açılı halka çekim */}
+          <button
+            onClick={() => setBoothOpen(true)}
+            className="w-full py-2 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/40 text-[11px] font-semibold text-cyan-200 flex items-center justify-center gap-1.5 transition"
+          >
+            <Camera className="w-3.5 h-3.5 text-cyan-300" />
+            Fotogrametri Kabini (8-16 Poz)
           </button>
 
           {/* 5 Angle Cards */}
@@ -1606,6 +1633,12 @@ function DesktopStudio() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         onApply={handleSheetApply}
+      />
+
+      <PhotoBoothModal
+        open={boothOpen}
+        onClose={() => setBoothOpen(false)}
+        onGenerated={handleBoothGenerated}
       />
 
       {qrOpen && sessionId && (
