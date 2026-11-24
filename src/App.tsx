@@ -50,6 +50,7 @@ import {
 import { reconstructVisualHull } from './engine/visualHull';
 import { reconstructContourExtrude } from './engine/contourExtrude';
 import { reconstructLathe } from './engine/latheRevolve';
+import { classifyViews, selectEngine, buildQualityHints, engineToOfflineMethod } from './engine/autoDetect';
 import {
   analyzeMesh,
   flatCutBottom,
@@ -104,6 +105,17 @@ function extractMergedGeometry(object3d: THREE.Object3D): THREE.BufferGeometry {
   return placeOnBuildPlate(merged);
 }
 
+/** Manuel açı atamasını autoDetect ipucuna çevirir (top = TOP_VIEW_HINT). */
+const ANGLE_HINT_DEG: Record<ViewAngle, number> = { front: 0, right: 90, back: 180, left: 270, top: -1 };
+
+const getImageSize = (dataUrl: string) =>
+  new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error('Görsel boyutları okunamadı.'));
+    img.src = dataUrl;
+  });
+
 export default function App() {
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const mobileSession = searchParams.get('mode') === 'mobile' ? searchParams.get('session') : null;
@@ -123,6 +135,8 @@ function DesktopStudio() {
   // Engine mode
   const [engineTab, setEngineTab] = useState<'offline' | 'cloud'>('offline');
   const [offlineMethod, setOfflineMethod] = useState<OfflineMethod>('visual-hull');
+  const [autoEngine, setAutoEngine] = useState(true);
+  const [qualityHints, setQualityHints] = useState<string[]>([]);
   const [hullResolution, setHullResolution] = useState(64);
   const [hullSmooth, setHullSmooth] = useState(2);
   const [targetSizeMm, setTargetSizeMm] = useState(60);
@@ -398,7 +412,24 @@ function DesktopStudio() {
       await new Promise((r) => setTimeout(r, 30));
       let nextGeo: THREE.BufferGeometry;
 
-      if (offlineMethod === 'visual-hull') {
+      // Otomatik çoklu-foto planı: boyut → açı sınıflandırma → motor seçimi + ipuçları
+      const sizedViews = await Promise.all(
+        activeViews
+          .filter((v) => Boolean(v.originalDataUrl) || Boolean(v.cleanedDataUrl))
+          .map(async (v) => {
+            const { width, height } = await getImageSize(v.cleanedDataUrl || v.originalDataUrl);
+            return { angleHint: ANGLE_HINT_DEG[v.angle], width, height };
+          })
+      );
+      const plan = classifyViews(sizedViews);
+      setQualityHints(buildQualityHints(plan));
+      const chosenMethod = autoEngine ? engineToOfflineMethod(selectEngine(plan)) : offlineMethod;
+      if (autoEngine && chosenMethod !== offlineMethod) {
+        setOfflineMethod(chosenMethod);
+        showToast('info', `Fotoğraf setine göre motor otomatik seçildi: ${chosenMethod}`);
+      }
+
+      if (chosenMethod === 'visual-hull') {
         const maskMap: Partial<Record<ViewAngle, BinaryMask>> = {};
         for (const v of activeViews) {
           if (v.mask) maskMap[v.angle] = v.mask;
@@ -408,7 +439,7 @@ function DesktopStudio() {
           smoothPasses: hullSmooth,
           sizeMm: targetSizeMm,
         });
-      } else if (offlineMethod === 'contour-extrude') {
+      } else if (chosenMethod === 'contour-extrude') {
         const primary = activeViews.find((v) => v.angle === 'front' && v.mask) ?? activeViews.find((v) => v.mask);
         if (!primary?.mask) throw new Error('Temizlenmiş ön görünüm maskesi bulunamadı.');
         nextGeo = reconstructContourExtrude(primary.mask, {
@@ -869,17 +900,44 @@ function DesktopStudio() {
             {engineTab === 'offline' ? (
               <div className="space-y-2.5 text-xs">
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400">Yeniden Oluşturma Modu</label>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Yeniden Oluşturma Modu</span>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-cyan-300">
+                      <input
+                        type="checkbox"
+                        checked={autoEngine}
+                        onChange={(e) => setAutoEngine(e.target.checked)}
+                        className="accent-cyan-500"
+                      />
+                      Otomatik Seç
+                    </label>
+                  </div>
                   <select
                     value={offlineMethod}
                     onChange={(e) => setOfflineMethod(e.target.value as OfflineMethod)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100"
+                    disabled={autoEngine}
+                    className={`w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 ${
+                      autoEngine ? 'opacity-60 cursor-not-allowed' : ''
+                    }`}
                   >
                     <option value="visual-hull">Çoklu Açı Silüet Kazıma (3–5 Fotoğraf)</option>
                     <option value="contour-extrude">Mekanik Kontur + Delik (1 Fotoğraf → Kalınlık)</option>
                     <option value="lathe-revolve">Dönel Simetri / Torna (Düğme, Kapak, Vazo)</option>
                   </select>
                 </div>
+
+                {qualityHints.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-cyan-800/50 bg-slate-950/60 p-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-300">
+                      Kalite İpuçları
+                    </div>
+                    <ul className="space-y-0.5">
+                      {qualityHints.map((hint, i) => (
+                        <li key={i} className="text-[10px] text-slate-300 leading-snug">• {hint}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {offlineMethod === 'visual-hull' && (
                   <div className="space-y-2">
