@@ -46,9 +46,10 @@ Doğrulama logları: `.zwork/verification/server.log`, `.zwork/verification/vite
 ## 3. Depo hazırlığı
 
 - `git init -b main` ile depo oluşturuldu (öncesinde klasör bir git deposu değildi).
+- Not: çalışma sırasında `.git` klasörü başka bir süreç tarafından 10:25:51'de oluşturulmuş ve `HEAD` `refs/heads/master` olarak kalmıştı; sıfır baytlık bir `index.lock` (10:26:09, tutan süreç artık yok) `git add`'i bloke ediyordu. Kilit silindi, `HEAD` `refs/heads/main` yapıldı. Commit öncesi depoda hiç commit yoktu (`git rev-list --all --count` = 0).
 - `.gitignore`: `node_modules/`, `dist/`, `uploads/`, `.zwork/`, `*.log` (+ `.env`, OS/IDE dosyaları).
 - `README.md`: Türkçe; ne yaptığı, kurulum, çalıştırma (`npm install` / `npm run dev` / `npm run server` / `npm test`), portlar (5173 / 3001), klasör yapısı, API tablosu, Android tarayıcı notları, yayınlama komutları.
-- İlk commit atıldı. `user.name = mtahiryilmazz`, `user.email = thrylmz@live.cn` mevcut global ayardan kullanıldı; yerel override yapılmadı.
+- İlk commit atıldı: `ab44af9` — "chore: depoyu baslat, .gitignore ve README ekle" (39 dosya, 12.919 satır). `git status` temiz. `user.name = mtahiryilmazz`, `user.email = thrylmz@live.cn` mevcut global ayardan kullanıldı; yerel override yapılmadı.
 - **Uzak depo eklenmedi, push yapılmadı.** README'de yalnızca komut olarak gösterildi:
   `git remote add origin https://github.com/mtahiryilmazz/photo2print-3d.git`
 
