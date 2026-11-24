@@ -222,6 +222,32 @@ export function exportGLB(geometry: THREE.BufferGeometry): Promise<ArrayBuffer> 
   });
 }
 
+/**
+ * Rig'li mesh + AnimationClip listesini tek GLB olarak export eder
+ * (GLTF `skins` + `animations` bölümleri dahil; Blender/Unity/Godot/Unreal uyumlu).
+ */
+export function exportAnimatedGLB(
+  skinnedMesh: THREE.Object3D,
+  clips: THREE.AnimationClip[]
+): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const exporter = new GLTFExporter();
+    exporter.parse(
+      skinnedMesh,
+      (result) => {
+        if (result instanceof ArrayBuffer) {
+          resolve(result);
+        } else {
+          const json = JSON.stringify(result);
+          resolve(new TextEncoder().encode(json).buffer);
+        }
+      },
+      (err) => reject(err),
+      { binary: true, animations: clips }
+    );
+  });
+}
+
 export function triggerDownload(
   data: ArrayBuffer | Uint8Array | string,
   filename: string,

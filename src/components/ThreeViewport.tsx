@@ -15,6 +15,10 @@ interface ThreeViewportProps {
   onToggleAutoRotate: () => void;
   isBusy?: boolean;
   busyLabel?: string;
+  /** Rig modu: verilirse normal mesh yerine SkinnedMesh gösterilir. */
+  skinnedMesh?: THREE.SkinnedMesh | null;
+  activeClip?: THREE.AnimationClip | null;
+  wireframeRig?: boolean;
 }
 
 export const ThreeViewport: React.FC<ThreeViewportProps> = ({
@@ -28,12 +32,18 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
   onToggleAutoRotate,
   isBusy,
   busyLabel,
+  skinnedMesh,
+  activeClip,
+  wireframeRig,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const skinnedRef = useRef<THREE.SkinnedMesh | null>(null);
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const clockRef = useRef(new THREE.Clock());
   const boxHelperRef = useRef<THREE.BoxHelper | null>(null);
   const gridGroupRef = useRef<THREE.Group | null>(null);
   const autoRotateRef = useRef(autoRotate);
@@ -128,6 +138,9 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     let animId = 0;
     const animate = () => {
       animId = requestAnimationFrame(animate);
+      if (mixerRef.current) {
+        mixerRef.current.update(clockRef.current.getDelta());
+      }
       controls.update();
       renderer.render(scene, camera);
     };
@@ -167,10 +180,44 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
       (meshRef.current.material as THREE.Material).dispose();
       meshRef.current = null;
     }
+    if (skinnedRef.current) {
+      scene.remove(skinnedRef.current);
+      skinnedRef.current = null;
+      mixerRef.current?.stopAllAction();
+      mixerRef.current = null;
+    }
     if (boxHelperRef.current) {
       scene.remove(boxHelperRef.current);
       boxHelperRef.current.dispose();
       boxHelperRef.current = null;
+    }
+
+    // RIG MODU: SkinnedMesh doğrudan sahneye eklenir; baskı mesh'i yerine geçer.
+    if (skinnedMesh) {
+      const m = skinnedMesh.material as THREE.MeshStandardMaterial;
+      m.wireframe = wireframeRig ?? false;
+      scene.add(skinnedMesh);
+      skinnedRef.current = skinnedMesh;
+
+      // Kamerayı rig etrafına çerçevele
+      skinnedMesh.geometry.computeBoundingBox();
+      const rbox = skinnedMesh.geometry.boundingBox;
+      if (rbox && cameraRef.current && controlsRef.current) {
+        const rsize = new THREE.Vector3();
+        const rcenter = new THREE.Vector3();
+        rbox.getSize(rsize);
+        rbox.getCenter(rcenter);
+        const rmax = Math.max(rsize.x, rsize.y, rsize.z, 20);
+        controlsRef.current.target.copy(rcenter);
+        cameraRef.current.position.set(
+          rcenter.x + rmax * 1.45,
+          rcenter.y + rmax * 0.9,
+          rcenter.z + rmax * 1.65
+        );
+        cameraRef.current.updateProjectionMatrix();
+        controlsRef.current.update();
+      }
+      return;
     }
 
     if (!geometry) return;
@@ -228,7 +275,22 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
       );
       controlsRef.current.update();
     }
-  }, [geometry, displayMode]);
+  }, [geometry, displayMode, skinnedMesh, wireframeRig]);
+
+  // Animasyon klibi değişince mixer'ı yeniden kur
+  useEffect(() => {
+    const target = skinnedRef.current;
+    if (!target) return;
+    mixerRef.current?.stopAllAction();
+    if (!activeClip) {
+      mixerRef.current = null;
+      return;
+    }
+    const mixer = new THREE.AnimationMixer(target);
+    const action = mixer.clipAction(activeClip);
+    action.reset().play();
+    mixerRef.current = mixer;
+  }, [activeClip, skinnedMesh]);
 
   const resetCamera = () => {
     if (!cameraRef.current || !controlsRef.current) return;

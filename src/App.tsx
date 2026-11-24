@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Layers,
   Lock,
+  Play,
   Printer,
   QrCode,
   RotateCcw,
@@ -62,12 +63,15 @@ import {
   taubinSmooth,
   voxelRemesh,
 } from './engine/meshRepair';
-import { build3MF, buildOBJ, buildSTLBinary, exportGLB, triggerDownload } from './engine/exporters';
+import { build3MF, buildOBJ, buildSTLBinary, exportAnimatedGLB, exportGLB, triggerDownload } from './engine/exporters';
+import { buildBipedRig, disposeRig, type RigResult } from './engine/rigging';
+import { buildAllClips, RIG_CLIP_LABELS, type RigClipName } from './engine/animClips';
 import { parsePLY } from './engine/plyImporter';
 import { ThreeViewport } from './components/ThreeViewport';
 import { MaskEditorModal } from './components/MaskEditorModal';
 import { QrPairingModal } from './components/QrPairingModal';
 import { MobileScannerView } from './components/MobileScannerView';
+import { CharacterSheetModal, type CharacterSheetApplyItem } from './components/CharacterSheetModal';
 
 const INITIAL_VIEWS: PhotoViewItem[] = [
   { angle: 'front', label: 'Ön (0°)', originalDataUrl: '', cleanedDataUrl: null, mask: null, tolerance: 34 },
@@ -153,6 +157,9 @@ function DesktopStudio() {
   const [offlineMethod, setOfflineMethod] = useState<OfflineMethod>('visual-hull');
   const [autoEngine, setAutoEngine] = useState(true);
   const [qualityHints, setQualityHints] = useState<string[]>([]);
+  const [rig, setRig] = useState<{ result: RigResult; clips: Record<RigClipName, THREE.AnimationClip> } | null>(null);
+  const [activeClip, setActiveClip] = useState<RigClipName>('idle');
+  const [wireframeRig, setWireframeRig] = useState(false);
 
   // Fotoğraf eklendiği/yüklendiği an otomatik algılama: eksik açı ve düşük çözünürlük
   // ipuçları ile birlikte önerilen motoru seçer. "3D Model Oluştur"a basmayı beklemez.
@@ -213,6 +220,7 @@ function DesktopStudio() {
   const [toast, setToast] = useState<{ type: 'info' | 'ok' | 'err'; text: string } | null>(null);
   const [demoMenuOpen, setDemoMenuOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [syncedFromPhone, setSyncedFromPhone] = useState<Record<string, string>>({});
   const [hasSyncedPly, setHasSyncedPly] = useState(false);
@@ -236,6 +244,23 @@ function DesktopStudio() {
     setToast({ type, text });
   }, []);
 
+  // Karakter sheet dilimlerini ilgili açı slotlarına yazar; temizlenmiş veri ve maske geçersizleşir.
+  const handleSheetApply = useCallback((items: CharacterSheetApplyItem[]) => {
+    if (items.length === 0) return;
+    setViews((prev) => {
+      const next = prev.map((v) => ({ ...v }));
+      for (const item of items) {
+        const target = next.find((v) => v.angle === item.angle);
+        if (!target) continue;
+        target.originalDataUrl = item.dataUrl;
+        target.cleanedDataUrl = null;
+        target.mask = null;
+      }
+      return next;
+    });
+    showToast('ok', `Karakter sheet'ten ${items.length} görünüm yüklendi.`);
+  }, [showToast]);
+
   const commitGeometry = useCallback((nextGeo: THREE.BufferGeometry, pushHistory = true) => {
     setGeometry((prev) => {
       if (prev && pushHistory) {
@@ -245,7 +270,48 @@ function DesktopStudio() {
       }
       return nextGeo;
     });
+    // Yeni geometri gelince eski rig geçersizdir: temizle.
+    setRig((prev) => {
+      if (prev) disposeRig(prev.result);
+      return null;
+    });
   }, []);
+
+  // ---- Rig & Animasyon (Oyun Modu) ----
+  const handleCreateRig = () => {
+    if (!geometry) {
+      showToast('err', 'Önce bir 3D model oluşturun veya içe aktarın.');
+      return;
+    }
+    try {
+      if (rig) disposeRig(rig.result);
+      const result = buildBipedRig(geometry);
+      const clips = buildAllClips(result.heightMm);
+      setRig({ result, clips });
+      setActiveClip('idle');
+      showToast('ok', `Rig oluşturuldu (${result.skeleton.bones.length} kemik) — idle animasyonu başladı.`);
+    } catch (err) {
+      showToast('err', (err as Error).message);
+    }
+  };
+
+  const handleRemoveRig = () => {
+    if (!rig) return;
+    disposeRig(rig.result);
+    setRig(null);
+    showToast('info', 'Rig kaldırıldı; baskı modeli aynen duruyor.');
+  };
+
+  const handleDownloadAnimatedGLB = async () => {
+    if (!rig) return;
+    try {
+      const buffer = await exportAnimatedGLB(rig.result.skinnedMesh, [rig.clips[activeClip]]);
+      triggerDownload(buffer, `photo2print-rigged-${activeClip}.glb`, 'model/gltf-binary');
+      showToast('ok', `Animasyonlu GLB indirildi (klip: ${activeClip}) — Blender/Unity/Godot/Unreal'de açılabilir.`);
+    } catch (err) {
+      showToast('err', (err as Error).message);
+    }
+  };
 
   const handleUndo = () => {
     if (undoStack.length === 0) return;
@@ -813,6 +879,15 @@ function DesktopStudio() {
             </label>
           </div>
 
+          {/* Karakter Sheet: tek görselden çoklu açı dilimleme */}
+          <button
+            onClick={() => setSheetOpen(true)}
+            className="w-full py-2 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/40 text-[11px] font-semibold text-violet-200 flex items-center justify-center gap-1.5 transition"
+          >
+            <Layers className="w-3.5 h-3.5 text-violet-300" />
+            Karakter Sheet'ten Yükle
+          </button>
+
           {/* 5 Angle Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2">
             {views.map((item) => (
@@ -1160,10 +1235,76 @@ function DesktopStudio() {
                 </button>
               </div>
             )}
+
+            {/* RIG & ANIMASYON (Oyun Modu) */}
+            <div className="bg-slate-950/70 border border-violet-800/60 rounded-xl p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <Play className="w-3.5 h-3.5 text-violet-400" />
+                  Rig & Animasyon (Oyun GLB)
+                </span>
+                {rig && (
+                  <span className="text-[10px] text-violet-300 font-mono">
+                    {rig.result.skeleton.bones.length} kemik
+                  </span>
+                )}
+              </div>
+              {rig ? (
+                <>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(Object.keys(RIG_CLIP_LABELS) as RigClipName[]).map((name) => (
+                      <button
+                        key={name}
+                        onClick={() => setActiveClip(name)}
+                        className={`py-1 rounded text-[10px] transition ${
+                          activeClip === name
+                            ? 'bg-violet-500 text-slate-950 font-bold'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={wireframeRig}
+                      onChange={(e) => setWireframeRig(e.target.checked)}
+                      className="accent-violet-400"
+                    />
+                    Wireframe göster
+                  </label>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={handleDownloadAnimatedGLB}
+                      className="flex-1 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 text-[11px] font-bold transition"
+                    >
+                      Animasyonlu GLB İndir
+                    </button>
+                    <button
+                      onClick={handleRemoveRig}
+                      className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition"
+                    >
+                      Kaldır
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-slate-500 leading-snug">
+                    Oyun motorlarına (Unity/Godot/Unreal) ve Blender'a aktarılabilir; baskı modeli etkilenmez.
+                  </p>
+                </>
+              ) : (
+                <button
+                  onClick={handleCreateRig}
+                  disabled={!geometry || isBusy}
+                  className="w-full py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-[11px] font-bold transition"
+                >
+                  Otomatik Biped Rig Oluştur
+                </button>
+              )}
+            </div>
           </div>
         </section>
-
-        {/* CENTER PANEL: Live 3D Viewport */}
         <section className="lg:col-span-5 xl:col-span-6 flex flex-col min-h-[420px]">
           <ThreeViewport
             geometry={geometry}
@@ -1176,6 +1317,9 @@ function DesktopStudio() {
             onToggleAutoRotate={() => setAutoRotate((v) => !v)}
             isBusy={isBusy}
             busyLabel={busyLabel}
+            skinnedMesh={rig?.result.skinnedMesh ?? null}
+            activeClip={rig ? rig.clips[activeClip] : null}
+            wireframeRig={wireframeRig}
           />
         </section>
 
@@ -1457,6 +1601,12 @@ function DesktopStudio() {
           }}
         />
       )}
+
+      <CharacterSheetModal
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        onApply={handleSheetApply}
+      />
 
       {qrOpen && sessionId && (
         <QrPairingModal
