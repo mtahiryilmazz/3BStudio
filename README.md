@@ -105,12 +105,24 @@ photo2print-3d/
 - Gerçek derinlik/nokta bulutu için `android-scanner` klasöründeki Kotlin projesi Android Studio ile derlenir; ayrıntılar: [android-scanner/README.md](android-scanner/README.md).
 - Telefon ile masaüstü arasında bağlantı kurulamıyorsa Windows güvenlik duvarında 5173 ve 3001 portlarına izin verin.
 
+## Başlatıcı (GUI)
+
+Kurulumu ve sunucuyu elle başlatmak yerine çift tıklanabilir bir başlatıcı vardır:
+
+- **`Photo2Print-Baslat.cmd`** — `start-studio.ps1` GUI'sini açar (PowerShell, kurulum gerekmez).
+- **`start-studio.ps1`** — Başlat / Durdur / Stüdyoyu Aç düğmeleri, 2 sn'de bir port durumu (5173 + 3001),
+  Wi-Fi adresi göstergesi ve pencere kapanınca süreci kapatma.
+- **`install-shortcut.ps1`** — Masaüstüne "Photo2Print 3D Studio" kısayolu oluşturur:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install-shortcut.ps1
+```
+
 ## Yayınlama (GitHub)
 
-Uzak depo henüz eklenmedi. İlk yayın için:
+Uzak depo: https://github.com/mtahiryilmazz/photo2print-3d (private, `main`)
 
 ```bash
-git remote add origin https://github.com/mtahiryilmazz/photo2print-3d.git
 git push -u origin main
 ```
 
