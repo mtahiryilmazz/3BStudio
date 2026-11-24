@@ -116,6 +116,22 @@ const getImageSize = (dataUrl: string) =>
     img.src = dataUrl;
   });
 
+/**
+ * Yüklü fotoğraflardan autoDetect girdisi üretir: piksel boyutu + açı ipucu.
+ * `loaded` ile `sized` aynı sıradadır; bu yüzden `ViewPlan.views[i].index`
+ * doğrudan `loaded[i]` fotoğrafını gösterir.
+ */
+const buildViewInputs = async (items: PhotoViewItem[]) => {
+  const loaded = items.filter((v) => Boolean(v.originalDataUrl) || Boolean(v.cleanedDataUrl));
+  const sized = await Promise.all(
+    loaded.map(async (v) => {
+      const { width, height } = await getImageSize(v.cleanedDataUrl || v.originalDataUrl);
+      return { angleHint: ANGLE_HINT_DEG[v.angle], width, height };
+    })
+  );
+  return { loaded, sized };
+};
+
 export default function App() {
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const mobileSession = searchParams.get('mode') === 'mobile' ? searchParams.get('session') : null;
@@ -137,6 +153,30 @@ function DesktopStudio() {
   const [offlineMethod, setOfflineMethod] = useState<OfflineMethod>('visual-hull');
   const [autoEngine, setAutoEngine] = useState(true);
   const [qualityHints, setQualityHints] = useState<string[]>([]);
+
+  // Fotoğraf eklendiği/yüklendiği an otomatik algılama: eksik açı ve düşük çözünürlük
+  // ipuçları ile birlikte önerilen motoru seçer. "3D Model Oluştur"a basmayı beklemez.
+  useEffect(() => {
+    let cancelled = false;
+    if (!views.some((v) => Boolean(v.originalDataUrl) || Boolean(v.cleanedDataUrl))) {
+      setQualityHints([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const { sized } = await buildViewInputs(views);
+        if (cancelled || sized.length === 0) return;
+        const plan = classifyViews(sized);
+        setQualityHints(buildQualityHints(plan));
+        if (autoEngine) setOfflineMethod(engineToOfflineMethod(selectEngine(plan)));
+      } catch {
+        // Boyut okunamazsa sessiz kal; üretim akışı kendi planını yeniden kurar.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [views, autoEngine]);
   const [hullResolution, setHullResolution] = useState(64);
   const [hullSmooth, setHullSmooth] = useState(2);
   const [targetSizeMm, setTargetSizeMm] = useState(60);
@@ -413,14 +453,7 @@ function DesktopStudio() {
       let nextGeo: THREE.BufferGeometry;
 
       // Otomatik çoklu-foto planı: boyut → açı sınıflandırma → motor seçimi + ipuçları
-      const sizedViews = await Promise.all(
-        activeViews
-          .filter((v) => Boolean(v.originalDataUrl) || Boolean(v.cleanedDataUrl))
-          .map(async (v) => {
-            const { width, height } = await getImageSize(v.cleanedDataUrl || v.originalDataUrl);
-            return { angleHint: ANGLE_HINT_DEG[v.angle], width, height };
-          })
-      );
+      const { loaded: loadedViews, sized: sizedViews } = await buildViewInputs(activeViews);
       const plan = classifyViews(sizedViews);
       setQualityHints(buildQualityHints(plan));
       const chosenMethod = autoEngine ? engineToOfflineMethod(selectEngine(plan)) : offlineMethod;
@@ -429,9 +462,22 @@ function DesktopStudio() {
         showToast('info', `Fotoğraf setine göre motor otomatik seçildi: ${chosenMethod}`);
       }
 
+      // Aynı açıdan birden fazla fotoğraf geldiyse en yüksek çözünürlüklü olan tutulur:
+      // düşük çözünürlüklü kopya visual hull kesişimini köreltir.
+      const keepIndexes = new Set(
+        plan.views.filter((v) => v.duplicateOfIndex === null).map((v) => v.index)
+      );
+      const keptViews = loadedViews.filter((_, i) => keepIndexes.has(i));
+      if (keptViews.length < loadedViews.length) {
+        showToast(
+          'info',
+          `${loadedViews.length - keptViews.length} tekrar eden fotoğraf atlandı (en yüksek çözünürlüklü olan kullanıldı).`
+        );
+      }
+
       if (chosenMethod === 'visual-hull') {
         const maskMap: Partial<Record<ViewAngle, BinaryMask>> = {};
-        for (const v of activeViews) {
+        for (const v of keptViews) {
           if (v.mask) maskMap[v.angle] = v.mask;
         }
         nextGeo = reconstructVisualHull(maskMap, {

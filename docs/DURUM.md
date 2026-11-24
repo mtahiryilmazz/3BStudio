@@ -60,3 +60,29 @@ Doğrulama logları: `.zwork/verification/server.log`, `.zwork/verification/vite
 - `POST /api/reconstruct/cloud` bulut AI sağlayıcılarına (HuggingFace/fal/Tripo/Meshy) dış istek attığı için çağrılmadı (API anahtarı/ağ bağımlılığı).
 - Gerçek mobil cihazla QR eşleştirme ve LAN erişimi test edilmedi (telefon gerekiyor).
 - `git push` / GitHub tarafı doğrulanmadı — kullanıcı onayı gerektiği için yapılmadı.
+
+## 5. Otomatik çoklu-foto algılama (yükleme anında)
+
+Kullanıcı akışı: "fotoğraf çekip atınca otomatik algılasın, çoklu fotoğrafla daha kaliteli poligon üretsin".
+
+- **Yükleme anında analiz:** `src/App.tsx` içine `buildViewInputs()` yardımcısı ve `views` değişimini izleyen
+  bir `useEffect` eklendi. Fotoğraf (veya Örnek Parça) yüklenir yüklenmez `classifyViews()` çalışıp
+  **KALİTE İPUÇLARI** paneli dolduruluyor ve `selectEngine()` sonucu motor olarak seçiliyor; artık
+  "3D Model Oluştur"a basmayı beklemiyor.
+- **Tekrar eden fotoğraf filtresi:** Aynı açıdan birden fazla foto gelirse `ViewPlan.duplicateGroups`
+  üzerinden en yüksek çözünürlüklü olan tutuluyor, diğerleri visual hull kesişimine sokulmuyor
+  (düşük çözünürlüklü kopya kesişimi köreltiyordu). Kullanıcıya kaç fotoğrafın atlandığı bildiriliyor.
+- **Üretim akışıyla tek kaynak:** `handleGenerateOffline()` de aynı `buildViewInputs()` + `classifyViews()`
+  zincirini kullanıyor; iki yerde farklı plan hesaplanması riski kalktı.
+
+Doğrulama (bu makinede):
+
+| Kontrol | Sonuç |
+| :--- | :--- |
+| `npx tsc --noEmit` | 0 hata |
+| `npx vitest run` | 20/20 (autoDetect 12 + engine 8) |
+| `npm run build` | başarılı (1.047 kB ana paket, yalnızca boyut uyarısı) |
+| Canlı (Chromium, `localhost:5199`) | Örnek Parça → Dekoratif Biblo: ipuçları **tıklamadan** geldi, motor "Çoklu Açı Silüet Kazıma" seçildi |
+| Uçtan uca üretim | Su geçirmez %100, 45.48 cm³, 13.252 üçgen, PLA ~56.4 g — export düğmeleri açıldı |
+
+- `start-studio.ps1` (Windows Forms başlatıcı: sunucu + Vite'ı başlatıp 5173'ü açar) depoya eklendi.
