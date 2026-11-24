@@ -94,10 +94,10 @@ function Update-Status {
         $status.ForeColor = [System.Drawing.Color]::ForestGreen
         $btnOpen.Enabled = $true
         try {
-            $info = (Invoke-WebRequest -Uri "$apiUrl/api/network-info" -UseBasicParsing -TimeoutSec 2).Content
-            $m = [regex]::Match($info, '"lan"[^"]*"([^"]+)"')
-            if (-not $m.Success) { $m = [regex]::Match($info, 'https?://\d+\.\d+\.\d+\.\d+:\d+') }
-            if ($m.Success) { $netInfo.Text = "Yerel ag (Wi-Fi) adresi: $($m.Groups[1].Value -replace '^https?://','')" }
+            $info = (Invoke-WebRequest -Uri "$apiUrl/api/network-info" -UseBasicParsing -TimeoutSec 2).Content | ConvertFrom-Json
+            if ($info.lanIp -and $info.frontendPort) {
+                $netInfo.Text = "Yerel ag (Wi-Fi) adresi: http://$($info.lanIp):$($info.frontendPort)"
+            }
         } catch { }
     } elseif ($webUp -or $apiUp) {
         $status.Text = 'Durum: Kismen calisiyor (bekleniyor...)'
