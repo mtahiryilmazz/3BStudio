@@ -19,7 +19,7 @@ beforeAll(() => {
 });
 
 /** Beyaz arka plan (245) üzerine koyu figür (30) çizen sahte sheet. */
-function makeSheet(width: number, height: number, figureSpans: Array<[number, number]>): FakeImageData {
+function makeSheet(width: number, height: number, figureSpans: Array<[number, number]>): ImageData {
   const img = new FakeImageData(width, height);
   img.data.fill(245);
   for (const [x0, x1] of figureSpans) {

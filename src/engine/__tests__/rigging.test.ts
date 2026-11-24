@@ -1,20 +1,38 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import * as THREE from 'three';
 import { buildBipedRig, buildBipedSkeleton, computeSkinAttributes, disposeRig } from '../rigging';
 import { buildClip, buildAllClips, RIG_CLIP_DURATIONS } from '../animClips';
 import { exportAnimatedGLB } from '../exporters';
 
-// GLTFExporter node ortamında FileReader kullanır: senkron stub yeterli.
+// GLTFExporter node ortamında FileReader kullanır: async stub yeterli.
 class FileReaderStub {
   result: ArrayBuffer | null = null;
+  onloadend: ((ev: { target: { result: ArrayBuffer | null } }) => void) | null = null;
   onload: ((ev: { target: { result: ArrayBuffer | null } }) => void) | null = null;
+  onerror: ((err: unknown) => void) | null = null;
   readAsArrayBuffer(blob: Blob | ArrayBuffer): void {
-    this.result = blob instanceof ArrayBuffer ? blob : new ArrayBuffer(0);
-    this.onload?.({ target: { result: this.result } });
+    const finish = (buf: ArrayBuffer) => {
+      this.result = buf;
+      const ev = { target: { result: buf } };
+      this.onload?.(ev);
+      this.onloadend?.(ev);
+    };
+    if (blob instanceof ArrayBuffer) {
+      finish(blob);
+    } else if (typeof blob.arrayBuffer === 'function') {
+      void blob.arrayBuffer().then(finish).catch((e) => this.onerror?.(e));
+    } else {
+      finish(new ArrayBuffer(0));
+    }
   }
-  readAsText(): void {
-    this.result = new ArrayBuffer(0);
-    this.onload?.({ target: { result: this.result } });
+  readAsText(blob: Blob | string): void {
+    void Promise.resolve(typeof blob === 'string' ? blob : '').then(() => {
+      const buf = new ArrayBuffer(0);
+      this.result = buf;
+      const ev = { target: { result: buf } };
+      this.onload?.(ev);
+      this.onloadend?.(ev);
+    });
   }
 }
 beforeAll(() => {
@@ -155,5 +173,5 @@ describe('exportAnimatedGLB', () => {
     expect(json).toContain('"animations"');
     disposeRig(rig);
     geo.dispose();
-  });
+  }, 20000);
 });

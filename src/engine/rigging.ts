@@ -167,13 +167,17 @@ export function computeSkinAttributes(
     let secondary: RigBoneName;
     if (t >= 0.50 && t <= 0.86 && absDxN > armThreshold) {
       // Kol bandı: omuzdan aşağı sarkan kollar (yukarıdan aşağıya).
-      if (t > 0.76) primary = 'upperArm';
-      else if (t > 0.62) primary = 'lowerArm';
-      else primary = 'hand';
-      secondary = t > 0.76 ? 'lowerArm' : 'upperArm';
       const side = xSign < 0 ? 'L' : 'R';
-      primary = (primary + side) as RigBoneName;
-      secondary = (secondary + side) as RigBoneName;
+      if (t > 0.76) {
+        primary = `upperArm${side}` as RigBoneName;
+        secondary = `lowerArm${side}` as RigBoneName;
+      } else if (t > 0.62) {
+        primary = `lowerArm${side}` as RigBoneName;
+        secondary = `upperArm${side}` as RigBoneName;
+      } else {
+        primary = `hand${side}` as RigBoneName;
+        secondary = `lowerArm${side}` as RigBoneName;
+      }
     } else {
       const band =
         BANDS.find((b) => t >= b.tMin && t < b.tMax) ?? BANDS[BANDS.length - 1];
