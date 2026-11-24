@@ -110,8 +110,9 @@ photo2print-3d/
 Kurulumu ve sunucuyu elle başlatmak yerine çift tıklanabilir bir başlatıcı vardır:
 
 - **`Photo2Print-Baslat.cmd`** — `start-studio.ps1` GUI'sini açar (PowerShell, kurulum gerekmez).
-- **`start-studio.ps1`** — Başlat / Durdur / Stüdyoyu Aç düğmeleri, 2 sn'de bir port durumu (5173 + 3001),
-  Wi-Fi adresi göstergesi ve pencere kapanınca süreci kapatma.
+- **`start-studio.ps1`** — WPF arayüzü: yuvarlatılmış özel başlık çubuğu (sürüklenebilir), koyu/açık **tema** düğmesi,
+  Başlat / Durdur / Stüdyoyu Aç düğmeleri, 2 sn'de bir port durumu (5173 + 3001), Wi-Fi adresi göstergesi
+  ve pencere kapanınca süreci kapatma.
 - **`install-shortcut.ps1`** — Masaüstüne "Photo2Print 3D Studio" kısayolu oluşturur:
 
 ```powershell
@@ -120,7 +121,7 @@ powershell -ExecutionPolicy Bypass -File install-shortcut.ps1
 
 ## Yayınlama (GitHub)
 
-Uzak depo: https://github.com/mtahiryilmazz/photo2print-3d (private, `main`)
+Uzak depo: https://github.com/mtahiryilmazz/3BStudio (private, `main`)
 
 ```bash
 git push -u origin main
