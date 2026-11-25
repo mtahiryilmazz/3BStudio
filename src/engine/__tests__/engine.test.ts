@@ -45,7 +45,7 @@ function makeRectMask(size: number, halfW: number, halfH: number): BinaryMask {
   return { width: size, height: size, data };
 }
 
-describe('Photo2Print 3D Engine', () => {
+describe('3BStudio 3D Engine', () => {
   it('marchingCubes produces a closed, watertight, positive-volume sphere', () => {
     const n = 36;
     const field = new Float32Array(n * n * n);

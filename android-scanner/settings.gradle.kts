@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Photo2PrintScanner"
+rootProject.name = "3BStudioScanner"
 include(":app")

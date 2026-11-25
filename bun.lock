@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "react-example",
+      "name": "3bstudio",
       "dependencies": {
         "@google/genai": "^3.6.1",
         "@gradio/client": "^2.8.0",

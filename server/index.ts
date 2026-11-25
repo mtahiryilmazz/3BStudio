@@ -394,5 +394,5 @@ app.post('/api/reconstruct/cloud', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   const lanIp = getLanIp();
-  console.log(`Photo2Print 3D API hazir: http://localhost:${PORT} (LAN: http://${lanIp}:${PORT})`);
+  console.log(`3BStudio 3D API hazir: http://localhost:${PORT} (LAN: http://${lanIp}:${PORT})`);
 });

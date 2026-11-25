@@ -35,6 +35,9 @@
 
 ## Kurulum ve Çalıştırma (Yerel Masaüstü WPF GUI & Web Portalı)
 
+### Windows · 3BStudio PowerShell Başlatıcısı
+`3BStudio-Baslat.cmd` dosyasına çift tıklayarak koyu teal yerel başlatıcıyı açın. Başlatıcı internet istemez; sunucuyu başlatır, canlı günlüğü gösterir ve hazır olunca Web Portalı düğmesini etkinleştirir. `Photo2Print-Baslat.cmd` eski masaüstü kısayolları için uyumluluk dosyası olarak korunur.
+
 ### Windows · Tek Tıkla WPF Masaüstü GUI Başlatıcı (Önerilen)
 Repoyu çektikten sonra kök dizindeki **`Start-3BStudio.bat`** dosyasına çift tıklamanız yeterlidir:
 1. Gerekirse `node_modules` bağımlılıklarını otomatik kurar.

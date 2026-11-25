@@ -221,7 +221,7 @@ export function buildBipedRig(
     material ??
     new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.38, metalness: 0.15 });
   const skinnedMesh = new THREE.SkinnedMesh(skinnedGeometry, mat);
-  skinnedMesh.name = 'photo2print_rigged';
+  skinnedMesh.name = '3bstudio_rigged';
   skinnedMesh.castShadow = true;
   skinnedMesh.add(rootBone);
   skinnedMesh.bind(skeleton);

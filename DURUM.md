@@ -32,12 +32,12 @@ Arka planda `npx tsx server/index.ts` ve `npx vite --host` başlatıldı, ardın
 
 | İstek | Durum | Yanıt |
 | --- | --- | --- |
-| `GET http://localhost:5173/` | 200 | `index.html` — başlık: "Photo2Print 3D Studio — Fotoğraftan 3D Baskı Stüdyosu" |
+| `GET http://localhost:5173/` | 200 | `index.html` — başlık: "3BStudio 3D Studio — Fotoğraftan 3D Baskı Stüdyosu" |
 | `GET http://localhost:5173/src/main.tsx` | 200 | Vite tarafından dönüştürülmüş modül (1.918 bayt) |
 | `GET http://localhost:3001/api/network-info` | 200 | `{"lanIp":"192.168.50.99","frontendPort":5173,"apiPort":3001,"mobileBaseUrl":"http://192.168.50.99:5173"}` |
 | `GET http://localhost:5173/api/network-info` (Vite proxy) | 200 | Aynı JSON — `/api` proxy'si çalışıyor |
 
-Sunucu açılış logu: `Photo2Print 3D API hazir: http://localhost:3001 (LAN: http://192.168.50.99:3001)`
+Sunucu açılış logu: `3BStudio 3D API hazir: http://localhost:3001 (LAN: http://192.168.50.99:3001)`
 
 Kapatma: 3001 ve 5173 dinleyen iki `node.exe` süreci (PID 13252 = tsx sunucusu, PID 16108 = vite) durduruldu; sonrasında portlar boş ve `http://localhost:3001` bağlantısı reddediliyor ("DOWN") olarak doğrulandı.
 
@@ -51,7 +51,7 @@ Doğrulama logları: `.zwork/verification/server.log`, `.zwork/verification/vite
 - `README.md`: Türkçe; ne yaptığı, kurulum, çalıştırma (`npm install` / `npm run dev` / `npm run server` / `npm test`), portlar (5173 / 3001), klasör yapısı, API tablosu, Android tarayıcı notları, yayınlama komutları.
 - İlk commit atıldı: `ab44af9` — "chore: depoyu baslat, .gitignore ve README ekle" (39 dosya, 12.919 satır). `git status` temiz. `user.name = mtahiryilmazz`, `user.email = thrylmz@live.cn` mevcut global ayardan kullanıldı; yerel override yapılmadı.
 - **Uzak depo eklenmedi, push yapılmadı.** README'de yalnızca komut olarak gösterildi:
-  `git remote add origin https://github.com/mtahiryilmazz/photo2print-3d.git`
+  `git remote add origin https://github.com/mtahiryilmazz/3BStudio.git`
 
 ## 4. Doğrulanmayan / kapsam dışı
 

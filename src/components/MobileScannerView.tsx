@@ -86,7 +86,7 @@ export const MobileScannerView: React.FC<MobileScannerViewProps> = ({ sessionId 
             <Smartphone className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-white">Photo2Print Mobil Tarayıcı</h1>
+            <h1 className="text-sm font-bold text-white">3BStudio Mobil Tarayıcı</h1>
             <p className="text-[11px] text-slate-400">
               Oturum: <span className="font-mono text-cyan-300">{sessionId}</span> • {completedCount}/5 açı
             </p>

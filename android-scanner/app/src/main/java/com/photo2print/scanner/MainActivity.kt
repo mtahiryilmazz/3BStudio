@@ -75,7 +75,7 @@ fun ScannerScreen(arManager: ArDepthSessionManager) {
     var isScanning by remember { mutableStateOf(false) }
     var depthSupported by remember { mutableStateOf<Boolean?>(null) }
     var pointCount by remember { mutableIntStateOf(0) }
-    var pcUrl by remember { mutableStateOf("http://192.168.1.100:3001") }
+    var pcUrl by remember { mutableStateOf("http://192.168.1.100:3000") }
     var sessionId by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("Kamerayı masadaki kırık parçaya doğrultun.") }
 
@@ -107,7 +107,7 @@ fun ScannerScreen(arManager: ArDepthSessionManager) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Photo2Print Android 3D Depth Tarayıcı",
+            text = "3BStudio Android 3D Derinlik Tarayıcı",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF38BDF8)
@@ -195,7 +195,7 @@ fun ScannerScreen(arManager: ArDepthSessionManager) {
         OutlinedTextField(
             value = pcUrl,
             onValueChange = { pcUrl = it },
-            label = { Text("PC Photo2Print API Adresi (örn: http://192.168.1.100:3001)") },
+            label = { Text("3BStudio adresi (örn: http://192.168.1.100:3000)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -221,7 +221,7 @@ fun ScannerScreen(arManager: ArDepthSessionManager) {
                     statusText = ".PLY oluşturuldu (${pts.size} nokta), PC'ye gönderiliyor..."
                     val res = PlyExporter.uploadToPcStudio(pcUrl, sessionId, outFile)
                     statusText = res.fold(
-                        onSuccess = { "✓ Nokta bulutu PC Photo2Print Stüdyosuna aktarıldı!" },
+                        onSuccess = { "✓ Nokta bulutu 3BStudio'ya aktarıldı!" },
                         onFailure = { e -> "Gönderim hatası: ${e.message}. Dosya: ${outFile.absolutePath}" }
                     )
                 }

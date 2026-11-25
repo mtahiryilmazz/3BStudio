@@ -48,7 +48,7 @@ dependencies {
     // Google ARCore Depth API (raw 16-bit millimeter depth + camera pose)
     implementation("com.google.ar:core:1.45.0")
 
-    // HTTP client for sending .PLY point clouds to PC Photo2Print 3D Studio
+    // HTTP client for sending .PLY point clouds to 3BStudio
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

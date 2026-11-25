@@ -112,7 +112,7 @@ export function buildSTLBinary(
   const buffer = new ArrayBuffer(84 + triCount * 50);
   const view = new DataView(buffer);
 
-  const headerText = 'Photo2Print 3D Studio - Binary STL (mm, Z-up)';
+  const headerText = '3BStudio 3D Studio - Binary STL (mm, Z-up)';
   for (let i = 0; i < Math.min(80, headerText.length); i++) {
     view.setUint8(i, headerText.charCodeAt(i));
   }
@@ -187,7 +187,7 @@ export function build3MF(
 
   const relsXml = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
 
-  const modelXml = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Title">Photo2Print 3D Model</metadata><metadata name="Application">Photo2Print 3D Studio</metadata><resources><object id="1" type="model"><mesh><vertices>${vertLines.join('')}</vertices><triangles>${triLines.join('')}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
+  const modelXml = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Title">3BStudio 3D Model</metadata><metadata name="Application">3BStudio 3D Studio</metadata><resources><object id="1" type="model"><mesh><vertices>${vertLines.join('')}</vertices><triangles>${triLines.join('')}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
 
   return zipSync(
     {
@@ -392,7 +392,7 @@ export function buildOBJ(
   const { vertices, indices } = toSlicerCoordinates(geo, true);
   if (owned) geo.dispose();
 
-  const lines: string[] = ['# Photo2Print 3D Studio - OBJ (mm, Z-up)', 'o Photo2PrintPart'];
+  const lines: string[] = ['# 3BStudio 3D Studio - OBJ (mm, Z-up)', 'o 3BStudioPart'];
 
   for (let i = 0; i < vertices.length; i += 3) {
     lines.push(
