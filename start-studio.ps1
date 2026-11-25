@@ -4,8 +4,9 @@
 
 $ErrorActionPreference = 'Stop'
 $rootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$studioUrl = 'http://localhost:5173'
-$apiUrl = 'http://localhost:3001'
+# Current server.ts serves both the UI and API on PORT (3000 by default).
+$studioUrl = 'http://localhost:3000'
+$apiUrl = $studioUrl
 $logFile = Join-Path $rootDir '.zwork\launcher-dev.log'
 $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $logFile)
 
@@ -185,15 +186,6 @@ function Write-Log([string]$message) {
     $logBox.ScrollToEnd()
 }
 
-function Test-Url([string]$url) {
-    try {
-        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
-        return ($response.StatusCode -eq 200)
-    } catch {
-        return $false
-    }
-}
-
 function Set-Running([bool]$value) {
     if ($script:running -eq $value) {
         Apply-Theme $script:theme
@@ -207,28 +199,21 @@ function Set-Running([bool]$value) {
 }
 
 function Update-Ui {
-    $webUp = Test-Url $studioUrl
-    $apiUp = Test-Url "$apiUrl/api/network-info"
+    # One short health request keeps the dispatcher responsive. The old
+    # launcher checked obsolete ports 5173 and 3001 with three synchronous
+    # requests per tick, freezing the WPF window for several seconds.
+    $info = $null
+    try {
+        $response = Invoke-WebRequest -Uri "$apiUrl/api/network-info" -UseBasicParsing -TimeoutSec 1
+        if ($response.StatusCode -eq 200) { $info = $response.Content | ConvertFrom-Json }
+    } catch { }
 
-    if ($webUp -and $apiUp) {
+    if ($info) {
         Set-Running $true
-        $statusText.Text = 'Durum: Calisiyor  (Web + API hazir)'
+        $statusText.Text = 'Durum: Calisiyor  (Yerel sunucu hazir)'
         $statusText.Foreground = Brush '#22C55E'
         $statusDot.Fill = Brush '#22C55E'
-        try {
-            $info = (Invoke-WebRequest -Uri "$apiUrl/api/network-info" -UseBasicParsing -TimeoutSec 2).Content | ConvertFrom-Json
-            if ($info.lanIp -and $info.frontendPort) {
-                $lanText.Text = "Yerel ag (Wi-Fi): http://$($info.lanIp):$($info.frontendPort)"
-            }
-        } catch { }
-        return
-    }
-
-    if ($webUp -or $apiUp) {
-        Set-Running $true
-        $statusText.Text = 'Durum: Kismen calisiyor (bekleniyor...)'
-        $statusText.Foreground = Brush '#F59E0B'
-        $statusDot.Fill = Brush '#F59E0B'
+        $lanText.Text = "Yerel ag (Wi-Fi): http://$($info.lanIp):$($info.frontendPort)"
         return
     }
 

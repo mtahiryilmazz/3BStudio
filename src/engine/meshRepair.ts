@@ -242,87 +242,138 @@ export function repairMesh(geometry: THREE.BufferGeometry): THREE.BufferGeometry
   welded.dispose();
 
   const positions = Array.from(posArr);
-  const indices = Array.from(idxArr);
-
-  // Find directed edges whose reverse is missing (open boundaries)
-  const directedSet = new Set<string>();
-  for (let i = 0; i + 2 < indices.length; i += 3) {
-    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
-    directedSet.add(`${a}->${b}`);
-    directedSet.add(`${b}->${c}`);
-    directedSet.add(`${c}->${a}`);
+  const faces: [number, number, number][] = [];
+  for (let i = 0; i + 2 < idxArr.length; i += 3) {
+    faces.push([idxArr[i], idxArr[i + 1], idxArr[i + 2]]);
   }
 
-  const boundaryNext = new Map<number, number[]>();
-  for (let i = 0; i + 2 < indices.length; i += 3) {
-    const tri = [indices[i], indices[i + 1], indices[i + 2]];
-    for (let e = 0; e < 3; e++) {
-      const u = tri[e];
-      const v = tri[(e + 1) % 3];
-      if (!directedSet.has(`${v}->${u}`)) {
-        const list = boundaryNext.get(u);
-        if (list) list.push(v);
-        else boundaryNext.set(u, [v]);
+  type EdgeUse = { face: number; forward: boolean; a: number; b: number };
+  const edgeKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const buildEdgeUses = () => {
+    const uses = new Map<string, EdgeUse[]>();
+    for (let fi = 0; fi < faces.length; fi++) {
+      const face = faces[fi];
+      for (let e = 0; e < 3; e++) {
+        const a = face[e], b = face[(e + 1) % 3];
+        const key = edgeKey(a, b);
+        const list = uses.get(key);
+        const use = { face: fi, forward: a < b, a, b };
+        if (list) list.push(use);
+        else uses.set(key, [use]);
       }
     }
+    return uses;
+  };
+
+  // Propagate consistent winding through manifold edge pairs. An edge shared
+  // by more than two faces is ambiguous, so leave it for the QA report.
+  const edgeUses = buildEdgeUses();
+  const neighbors: { face: number; flip: boolean }[][] = Array.from({ length: faces.length }, () => []);
+  for (const uses of edgeUses.values()) {
+    if (uses.length !== 2) continue;
+    const [a, b] = uses;
+    const mustFlip = a.forward === b.forward;
+    neighbors[a.face].push({ face: b.face, flip: mustFlip });
+    neighbors[b.face].push({ face: a.face, flip: mustFlip });
   }
-
-  // Chain boundary loops and cap each with centroid fan
-  const visitedEdges = new Set<string>();
-  for (const [startU, nexts] of boundaryNext.entries()) {
-    for (const firstV of nexts) {
-      const edgeKey = `${startU}->${firstV}`;
-      if (visitedEdges.has(edgeKey)) continue;
-
-      const loop: number[] = [startU];
-      let currU = startU;
-      let currV = firstV;
-      let guard = 0;
-
-      while (guard++ < 50000) {
-        visitedEdges.add(`${currU}->${currV}`);
-        if (currV === startU) break;
-        loop.push(currV);
-
-        const candidates = boundaryNext.get(currV);
-        if (!candidates || candidates.length === 0) break;
-        const nextV = candidates.find((cand) => !visitedEdges.has(`${currV}->${cand}`));
-        if (nextV === undefined) break;
-        currU = currV;
-        currV = nextV;
-      }
-
-      if (loop.length >= 3) {
-        let cx = 0, cy = 0, cz = 0;
-        for (const vi of loop) {
-          cx += positions[vi * 3];
-          cy += positions[vi * 3 + 1];
-          cz += positions[vi * 3 + 2];
-        }
-        const inv = 1 / loop.length;
-        const centerIdx = positions.length / 3;
-        positions.push(cx * inv, cy * inv, cz * inv);
-
-        for (let k = 0; k < loop.length; k++) {
-          const u = loop[k];
-          const v = loop[(k + 1) % loop.length];
-          // Reverse edge v -> u -> center matches adjacent face u -> v
-          indices.push(v, u, centerIdx);
+  const flipState = new Int8Array(faces.length).fill(-1);
+  for (let seed = 0; seed < faces.length; seed++) {
+    if (flipState[seed] !== -1) continue;
+    flipState[seed] = 0;
+    const queue = [seed];
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
+      for (const link of neighbors[current]) {
+        const expected = flipState[current] ^ Number(link.flip);
+        if (flipState[link.face] === -1) {
+          flipState[link.face] = expected;
+          queue.push(link.face);
         }
       }
     }
   }
+  for (let fi = 0; fi < faces.length; fi++) {
+    if (flipState[fi] === 1) [faces[fi][1], faces[fi][2]] = [faces[fi][2], faces[fi][1]];
+  }
 
-  // Verify outward winding via signed volume
+  // Only cap simple, closed boundary loops. Branches and non-manifold seams
+  // are kept open instead of being guessed into a potentially damaging patch.
+  const directedBoundary: [number, number][] = [];
+  for (const uses of buildEdgeUses().values()) {
+    if (uses.length !== 1) continue;
+    directedBoundary.push([uses[0].a, uses[0].b]);
+  }
+  const nextByVertex = new Map<number, number>();
+  const inDegree = new Map<number, number>();
+  const ambiguous = new Set<number>();
+  for (const [a, b] of directedBoundary) {
+    if (nextByVertex.has(a)) ambiguous.add(a);
+    else nextByVertex.set(a, b);
+    inDegree.set(b, (inDegree.get(b) ?? 0) + 1);
+  }
+  for (const [a] of nextByVertex) if ((inDegree.get(a) ?? 0) !== 1) ambiguous.add(a);
+
+  const visited = new Set<number>();
+  for (const [start] of nextByVertex) {
+    if (visited.has(start) || ambiguous.has(start)) continue;
+    const loop: number[] = [];
+    let current = start;
+    while (!visited.has(current) && !ambiguous.has(current) && loop.length <= directedBoundary.length) {
+      visited.add(current);
+      loop.push(current);
+      const next = nextByVertex.get(current);
+      if (next === undefined) break;
+      current = next;
+      if (current === start) break;
+    }
+    if (current !== start || loop.length < 3) continue;
+
+    let cx = 0, cy = 0, cz = 0;
+    for (const vi of loop) {
+      cx += positions[vi * 3]; cy += positions[vi * 3 + 1]; cz += positions[vi * 3 + 2];
+    }
+    const centerIdx = positions.length / 3;
+    const inv = 1 / loop.length;
+    positions.push(cx * inv, cy * inv, cz * inv);
+    for (let k = 0; k < loop.length; k++) {
+      const u = loop[k], v = loop[(k + 1) % loop.length];
+      faces.push([v, u, centerIdx]);
+    }
+  }
+
+  // Orient each connected shell independently; disconnected parts may have
+  // opposite input winding and must not cancel each other's signed volume.
+  const finalNeighbors: number[][] = Array.from({ length: faces.length }, () => []);
+  for (const uses of buildEdgeUses().values()) {
+    if (uses.length !== 2) continue;
+    finalNeighbors[uses[0].face].push(uses[1].face);
+    finalNeighbors[uses[1].face].push(uses[0].face);
+  }
+  const componentSeen = new Uint8Array(faces.length);
+  for (let seed = 0; seed < faces.length; seed++) {
+    if (componentSeen[seed]) continue;
+    const component: number[] = [];
+    const queue = [seed]; componentSeen[seed] = 1;
+    for (let head = 0; head < queue.length; head++) {
+      const face = queue[head]; component.push(face);
+      for (const neighbor of finalNeighbors[face]) {
+        if (componentSeen[neighbor]) continue;
+        componentSeen[neighbor] = 1; queue.push(neighbor);
+      }
+    }
+    let volume6 = 0;
+    for (const fi of component) {
+      const [a, b, c] = faces[fi];
+      const ax = positions[a * 3], ay = positions[a * 3 + 1], az = positions[a * 3 + 2];
+      const bx = positions[b * 3], by = positions[b * 3 + 1], bz = positions[b * 3 + 2];
+      const cx = positions[c * 3], cy = positions[c * 3 + 1], cz = positions[c * 3 + 2];
+      volume6 += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+    }
+    if (volume6 < 0) for (const fi of component) [faces[fi][1], faces[fi][2]] = [faces[fi][2], faces[fi][1]];
+  }
+
   const fPos = new Float32Array(positions);
-  const fIdx = new Uint32Array(indices);
-  if (signedMeshVolume(fPos, fIdx) < 0) {
-    for (let i = 0; i + 2 < fIdx.length; i += 3) {
-      const tmp = fIdx[i + 1];
-      fIdx[i + 1] = fIdx[i + 2];
-      fIdx[i + 2] = tmp;
-    }
-  }
+  const fIdx = new Uint32Array(faces.flat());
 
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(fPos, 3));

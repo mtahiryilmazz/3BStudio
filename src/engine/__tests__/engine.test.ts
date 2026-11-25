@@ -127,6 +127,22 @@ describe('Photo2Print 3D Engine', () => {
     expect(after.isWatertight).toBe(true);
   });
 
+  it('repairMesh fixes inconsistent face winding without changing a closed model volume', () => {
+    const cylinder = new THREE.CylinderGeometry(12, 12, 24, 20, 1, false);
+    const damaged = cylinder.clone();
+    const index = damaged.getIndex()!;
+    const b = index.getX(1);
+    index.setX(1, index.getX(2));
+    index.setX(2, b);
+    index.needsUpdate = true;
+
+    const before = analyzeMesh(cylinder);
+    const repaired = repairMesh(damaged);
+    const after = analyzeMesh(repaired);
+    expect(after.isWatertight).toBe(true);
+    expect(after.volumeCm3).toBeCloseTo(before.volumeCm3, 1);
+  });
+
   it('voxelRemesh, taubinSmooth, simplifyMesh, scaleToDimension, and flatCutBottom work cleanly', () => {
     const box = new THREE.BoxGeometry(20, 30, 20);
     const remeshed = voxelRemesh(box, 36);
