@@ -92,6 +92,25 @@ describe('detectSheetLayout', () => {
     expect(layout.cells.length).toBeGreaterThanOrEqual(1);
     expect(layout.cells[0].kind).toBe('figure');
   });
+
+  it('açıları içerikten önerir: yüz → ön, dar → yan, yüz yok → arka', () => {
+    const img = new FakeImageData(800, 420);
+    const body: [number, number, number] = [70, 70, 78];
+    const skin: [number, number, number] = [200, 150, 120];
+
+    // Ön: geniş gövde + ten rengi kafa
+    fill(img, 20, 20, 200, 360, body);
+    fill(img, 85, 40, 70, 70, skin);
+    // İki yan: dar silüet
+    fill(img, 260, 20, 120, 360, body);
+    fill(img, 420, 20, 120, 360, body);
+    // Arka: geniş gövde, yüz yok
+    fill(img, 580, 20, 200, 360, body);
+
+    const layout = detectSheetLayout(img as unknown as ImageData);
+    const angles = layout.cells.filter((c) => c.kind === 'figure').map((c) => c.suggestedAngle);
+    expect(angles).toEqual(['front', 'right', 'left', 'back']);
+  });
 });
 
 describe('subdivideGeometry', () => {

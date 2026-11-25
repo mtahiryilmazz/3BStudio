@@ -151,6 +151,8 @@ export interface SheetCell extends SheetSlice {
   faceConfidence: number;
   /** Hücrenin satır bandı indeksi (üstten 0). */
   row: number;
+  /** İçerikten çıkarılan açı önerisi (yüz yok → arka, dar → yan). */
+  suggestedAngle: 'front' | 'right' | 'back' | 'left' | 'top';
 }
 
 export interface SheetLayout {
@@ -254,6 +256,7 @@ export function detectSheetLayout(data: ImageData, options: SheetSplitOptions = 
 
   const cells: SheetCell[] = [];
   const minCellW = Math.max(8, Math.floor(width * minSliceRatio * 0.6));
+  const narrowSeen = new Map<number, number>();
 
   bands.forEach((band, rowIndex) => {
     const bandH = band.end - band.start + 1;
@@ -300,7 +303,23 @@ export function detectSheetLayout(data: ImageData, options: SheetSplitOptions = 
       const crop = cropImageData(data, { x, y, width: w, height: h });
       const aspect = h / Math.max(1, w);
       const face = detectFaceRegion(crop);
-      const isFace = Boolean(face && face.confidence >= 0.2 && aspect < 1.7);
+      const faceConfidence = face ? face.confidence : 0;
+      const isFace = Boolean(face && faceConfidence >= 0.2 && aspect < 1.7);
+
+      // Açı adlandırması içerikten: yüz görünen geniş gövde → ön;
+      // yüz yok + dar silüet → yan (önce sağ, sonra sol); yüz yok + geniş → arka.
+      let suggestedAngle: SheetCell['suggestedAngle'];
+      if (isFace) {
+        suggestedAngle = 'front';
+      } else if (w / Math.max(1, h) <= 0.45) {
+        const used = narrowSeen.get(rowIndex) ?? 0;
+        suggestedAngle = used === 0 ? 'right' : 'left';
+        narrowSeen.set(rowIndex, used + 1);
+      } else if (faceConfidence >= 0.15) {
+        suggestedAngle = 'front';
+      } else {
+        suggestedAngle = 'back';
+      }
 
       cells.push({
         x,
@@ -308,8 +327,9 @@ export function detectSheetLayout(data: ImageData, options: SheetSplitOptions = 
         width: w,
         height: h,
         kind: isFace ? 'face' : 'figure',
-        faceConfidence: isFace && face ? face.confidence : 0,
+        faceConfidence: isFace ? faceConfidence : 0,
         row: rowIndex,
+        suggestedAngle,
       });
     }
   });
@@ -318,7 +338,7 @@ export function detectSheetLayout(data: ImageData, options: SheetSplitOptions = 
   if (limited.length === 0) {
     return {
       cells: [
-        { x: 0, y: 0, width, height, kind: 'figure', faceConfidence: 0, row: 0 },
+        { x: 0, y: 0, width, height, kind: 'figure', faceConfidence: 0, row: 0, suggestedAngle: 'front' },
       ],
       rows: 1,
       background: bg,

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ViewAngle } from '../engine/types';
-import { cropImageData, detectSheetLayout, suggestSliceAngles } from '../engine/sheetSplit';
+import { cropImageData, detectSheetLayout } from '../engine/sheetSplit';
 import type { SheetCellKind } from '../engine/sheetSplit';
 import { dataUrlToImageData, fileToDataUrl } from '../engine/maskProcessor';
 import { detectFaceRegion } from '../engine/faceDetect';
@@ -206,10 +206,19 @@ export const CharacterSheetModal: React.FC<CharacterSheetModalProps> = ({ open, 
           facePreview = null;
         }
 
-        const suggested = suggestSliceAngles(figureCells.length);
-        const nextAngles: ViewAngle[] = cells.map((cell, i) =>
-          cell.kind === 'face' ? 'top' : suggested[Math.min(i, suggested.length - 1)]
-        );
+        // Açılar hücre içeriğinden önerilir (yüz yok → arka, dar → yan);
+        // aynı açı iki kez çıkarsa sıradaki kullanılmamış açıya düşer.
+        const order: ViewAngle[] = ['front', 'right', 'back', 'left', 'top'];
+        const usedAngles = new Set<ViewAngle>();
+        const nextAngles: ViewAngle[] = cells.map((cell) => {
+          if (cell.kind === 'face') return 'top';
+          let angle: ViewAngle = cell.suggestedAngle;
+          if (usedAngles.has(angle)) {
+            angle = order.find((a) => !usedAngles.has(a)) ?? angle;
+          }
+          usedAngles.add(angle);
+          return angle;
+        });
 
         fullCanvasesRef.current = canvases;
         faceCanvasRef.current = faceCanvas;
