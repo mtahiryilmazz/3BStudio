@@ -121,10 +121,33 @@ function mean(values: number[]): number {
   return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-/** Derece ipucunu en yakın 90° katına yuvarlayıp `ViewAngle`'a çevirir. */
+/** Tüm 9 desteklenen açı (5 temel + 4 çapraz 3/4). */
+export const EXTENDED_VIEW_ANGLES: readonly ViewAngle[] = [
+  'front',
+  'frontRight',
+  'right',
+  'backRight',
+  'back',
+  'backLeft',
+  'left',
+  'frontLeft',
+  'top',
+];
+
+/** Derece ipucunu en yakın 45°/90° açısına yuvarlayıp `ViewAngle`'a çevirir. */
 function angleFromHint(hint: number): ViewAngle {
   if (hint === TOP_VIEW_HINT) return 'top';
   const normalized = ((hint % 360) + 360) % 360;
+  // 45° ara açıları (±15° pencereyle) yakala; diğerlerini en yakın 90° ana açıya yuvarla
+  const diagonals: Array<[number, ViewAngle]> = [
+    [45, 'frontRight'],
+    [135, 'backRight'],
+    [225, 'backLeft'],
+    [315, 'frontLeft'],
+  ];
+  for (const [deg, angle] of diagonals) {
+    if (Math.abs(normalized - deg) <= 15) return angle;
+  }
   const quadrant = Math.round(normalized / 90) % 4;
   const byQuadrant: ViewAngle[] = ['front', 'right', 'back', 'left'];
   return byQuadrant[quadrant];
@@ -186,7 +209,7 @@ export function classifyViews(images: readonly ViewInput[]): ViewPlan {
 
   // Aynı açıya düşenleri grupla, en yüksek kısa kenarlı olanı koru.
   const duplicateGroups: DuplicateGroup[] = [];
-  for (const angle of ALL_VIEW_ANGLES) {
+  for (const angle of EXTENDED_VIEW_ANGLES) {
     const members = views.filter((v) => v.angle === angle);
     if (members.length < 2) continue;
     const keep = members.reduce((best, cur) =>
@@ -206,7 +229,7 @@ export function classifyViews(images: readonly ViewInput[]): ViewPlan {
   }
 
   const kept = views.filter((v) => v.duplicateOfIndex === null);
-  const presentAngles = ALL_VIEW_ANGLES.filter((angle) => kept.some((v) => v.angle === angle));
+  const presentAngles = EXTENDED_VIEW_ANGLES.filter((angle) => kept.some((v) => v.angle === angle));
   const missingAngles = ALL_VIEW_ANGLES.filter((angle) => !presentAngles.includes(angle));
   const uniqueAngleCount = presentAngles.length;
 

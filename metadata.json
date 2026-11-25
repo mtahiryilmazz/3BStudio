@@ -1,0 +1,6 @@
+{
+  "name": "3BStudio — Yerel 3B Mesh, Poligon ve Rig Stüdyosu",
+  "description": "Oyun karakteri, mekanik ve mimari 3B model üretimi, fotoğraftan 3B rekonstrüksiyon, manuel poligon artırma, otomatik iskelet rig/skinning ve GLB/OBJ/STL dışa aktarımı sunan yerel 3B stüdyo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -184,7 +184,7 @@ app.post('/api/reconstruct/cloud', async (req, res) => {
       const targetSpace = spaceId || 'tencent/Hunyuan3D-2mv';
       const tokenOpt = hfToken && hfToken.startsWith('hf_') ? (hfToken as `hf_${string}`) : undefined;
 
-      const client = await Client.connect(targetSpace, tokenOpt ? { hf_token: tokenOpt } : undefined);
+      const client = await Client.connect(targetSpace, tokenOpt ? { token: tokenOpt } : undefined);
       const apiInfo = await client.view_api();
 
       const frontBlob = dataUrlToBlob(images.front);

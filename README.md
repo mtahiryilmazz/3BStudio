@@ -1,130 +1,85 @@
-# Photo2Print 3D Studio
+# 3BStudio
 
-Fotoğraftan **3D baskıya hazır model** üreten bir stüdyo uygulaması. Telefonla çekilen 1–5 açı fotoğrafı (veya Android ARCore nokta bulutu) yükleyin; uygulama arka plan maskesi, çoklu görünüm füzyonu, ağ onarımı ve baskı öncesi ölçekleme adımlarından geçirip **STL / 3MF / OBJ / GLB** olarak dışa aktarır. Tarayıcıda çalışan arayüz Three.js ile canlı önizleme verir; fotoğraf/bulut işlemleri için yerel bir Express API'si vardır.
+**3BStudio**, tek veya çoklu açı fotoğraflarından, karakter sheet'lerinden ya da metin tariflerinden doğrudan tarayıcıda **2K PBR dokulu, su geçirmez (manifold) 3D modeller** üreten; **3D Baskı Doktoru**, **Bambu AMS / Anycubic ACE Pro çok renkli `.3mf`**, **ComfyUI resmi GPU iş akışları**, **ücretsiz Hugging Face Bulut 3D kuyruğu** ve **Node.js CLI** desteği sunan açık/koyu çift temalı 3D stüdyodur.
 
-## Gereksinimler
+---
 
-- Node.js 20 veya üzeri (proje `type: module`, ESM)
-- npm 10+
-- Android/iOS telefon (isteğe bağlı, QR eşleştirme ile fotoğraf çekimi için)
+## Öne Çıkan Özellikler
 
-## Kurulum
+### 1. Yerel 2K PBR Fotogrametri Motoru (GPU Gerektirmez)
+- **BiRefNet-Stili Maske Sertleştirme**: Kenarlardaki yarı saydam pikselleri sertleştirir ve 1px arka plan renk halesini temizler (`hardenAlphaMask`).
+- **Organik 2D EDT Hacim & 360° Renk Projeksiyonu**: 1–9 açıdan (Ön, Sağ, Arka, Sol, Üst + 3/4 çapraz açılar) organik şişirme, eksik/bantlı kafa tamamlama ve yakın yüz portresi bindirme.
+- **SF3D Albedo Delighting & 2K PBR Atlas**: Gölge/parlama arındırma (`Delighting`), Sobel Tangent-Space Normal, Roughness, Metallic ve Ambient Occlusion haritaları.
+- **Gevşek Parça Temizliği & Manifold Onarım**: `<%0.5` yüzen üçgen adacıklarını temizler, delikleri kapatır ve modeli `Y=0` baskı tablasına oturtur.
+- **Anlık Multi-LOD (`Tam · 20K · 5K`) & Fotoğraf ↔ 3D Kıyaslama**: 2K Normal/AO UV haritalarını koruyarak oyun/web/mobil LOD seviyeleri arasında anında geçiş yapar.
+
+### 2. 3D Baskı Doktoru, PolyMolly QA & Çok Renkli `.3mf`
+- **PolyMolly 6-Kontrollü QA Kapısı**: Y=0 pivot, 1:1 gerçek ölçek, su geçirmezlik, temiz normaller, 2K UV/PBR ve motor poligon bütçesi doğrulaması (Blender, Unity, Godot, Unreal, 3D Baskı).
+- **3D Baskı Doktoru**: `>45°` sarkan yüzey yüzdesi, 3D Ağırlık Merkezi (CoG) statik denge kontrolü, 220×220×250 mm tabla uyumu, ortalama üçgen kalitesi ve Ön Silüet-IoU (%).
+- **Figür Sergi Kaidesi**: İnce ayaklı figürler için tek tıkla `Y=0` tabanlı pahlı dairesel sergi kaidesi ekler.
+- **Bambu AMS / Anycubic ACE Pro `.3mf`**: K-Means renk kuantizasyonu (4–8 filament slotu) ve 3MF `<basematerials>` tanımlarıyla doğrudan çok renkli dilimleyici çıktısı.
+
+### 3. Ücretsiz Hugging Face Bulut 3D Kuyruğu
+- `TencentARC/Pixal3D`, `stabilityai/stable-fast-3d`, `tencent/Hunyuan3D-2mv`, `tencent/Hunyuan3D-2`, `microsoft/TRELLIS` ve `VAST-AI/TripoSG` dahil **9 ücretsiz Space** havuzu.
+- Canlı durum taraması (`GET /api/cloud/health`), 1024 px yükleme optimizasyonu, 1.5 saniyelik güvenli JSON kuyruk takibi ve anında **İptal Et** desteği.
+
+### 4. ComfyUI Yerel GPU İş Akışları (`BiRefNet → MoGe → Pixal3D`)
+- Resmi `Comfy-Org/BiRefNet`, `Comfy-Org/MoGe`, `Comfy-Org/Pixal3D` (`Single BF16`, `MultiView BF16`, `INT8 ConvRot`), `stabilityai/stable-fast-3d` ve `tencent/Hunyuan3D-2` ağırlık yollarına uyumlu 5 hazır `.json` şablonu.
+
+### 5. Parametrik Text-to-CAD, Rig & Animasyon ve Android QR
+- Metinden canlı parametre sürgülü mekanik CAD modelleri + `build123d` (`.py`) ihracı.
+- Otomatik 17 kemikli Biped Rig + animasyonlu `.glb` ihracı.
+- QR kod ile Android telefondan çoklu fotoğraf ve `.PLY` nokta bulutu aktarımı.
+
+---
+
+## Kurulum ve Çalıştırma (Yerel Masaüstü WPF GUI & Web Portalı)
+
+### Windows · Tek Tıkla WPF Masaüstü GUI Başlatıcı (Önerilen)
+Repoyu çektikten sonra kök dizindeki **`Start-3BStudio.bat`** dosyasına çift tıklamanız yeterlidir:
+1. Gerekirse `node_modules` bağımlılıklarını otomatik kurar.
+2. Yerel `3BStudio` sunucusunu (`http://localhost:3000`) arka planda başlatır ve pencere kapatıldığında temiz şekilde sonlandırır.
+3. **WPF Masaüstü Başlatıcı** (`desktop/3BStudio.Launcher`) içinden tek tıkla:
+   - **Masaüstü GUI (WebView2)** — 3BStudio'yu doğrudan Windows masaüstü penceresinde GPU WebGL hızlandırmasıyla açar.
+   - **Web Portalı (Tarayıcı)** — `http://localhost:3000` adresini tarayıcıda açar ve Android QR eşleştirme için yerel ağ URL'sini kopyalar.
+
+> **Not:** WPF arayüzü için Windows üzerinde [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (`winget install Microsoft.DotNet.SDK.8`) ve Microsoft Edge WebView2 (Windows 10/11'de yerleşik) gerekir. Kalıcı `.exe` derlemek için: `.\Start-3BStudio.ps1 -BuildRelease`
+
+### Manuel Terminal / Web Portalı (Windows · macOS · Linux)
 
 ```bash
 npm install
-```
-
-## Çalıştırma
-
-```bash
-# Arayüz + API birlikte (otomatik port: 5173 ve 3001)
 npm run dev
 ```
 
-Ayrı ayrı çalıştırmak isterseniz:
+Uygulama varsayılan olarak `http://localhost:3000` adresinde başlar. İsteğe bağlı sunucu ortam değişkenleri için `.env.example` dosyasını `.env` olarak kopyalayabilirsiniz (`GEMINI_API_KEY` yalnızca sunucu tarafında isteğe bağlı oran kalibrasyonu ve Text-to-CAD için kullanılır; yerel 2K PBR motoru anahtar olmadan tamamen çevrimdışı çalışır).
+
+---
+
+## CLI Kullanımı (`convert` & `doctor`)
 
 ```bash
-# Yalnızca API (Express + tsx) — http://localhost:3001
-npm run server
+# Sistem sağlık kontrolü (Node, bağımlılıklar, bellek, disk)
+npm run cli -- doctor
 
-# Yalnızca arayüz (Vite) — http://localhost:5173
-npx vite
+# Klasör veya karakter sheet'ten GLB + 3MF + LOD + 4 Renkli AMS .3mf + run.json üretimi
+npm run cli -- --input ./photos --out ./output/karakter --profile studio-ultra --lod --ams-colors 4 --pedestal --formats glb,3mf,stl
+
+# Resmi ComfyUI Pixal3D workflow JSON üretimi
+npm run cli -- --comfy-workflow pixal3d-single --out ./output/comfy_pixal3d
 ```
 
-`npm run dev` iki süreci `concurrently` ile başlatır; Vite `/api` ve `/uploads` isteklerini `http://localhost:3001` adresine yönlendirir (bkz. `vite.config.ts`).
+---
 
-### Portlar
-
-| Servis | Port | Adres |
-| --- | --- | --- |
-| Arayüz (Vite) | 5173 | http://localhost:5173 |
-| API (Express) | 3001 | http://localhost:3001 |
-| Yüklenen dosyalar (statik) | 3001 | http://localhost:3001/uploads/... |
-
-Yerel ağ IP'nizi ve mobil erişim adresini öğrenmek için: `GET http://localhost:3001/api/network-info`
-
-### Test ve derleme
+## Test ve Üretim Derlemesi
 
 ```bash
-npm test          # vitest run — src/engine altındaki birim testleri
-npm run build     # tsc --noEmit && vite build → dist/
+# Birim testleri (Vitest)
+npx vitest run
+
+# TypeScript + ESLint + Vite üretim derlemesi
+npm run lint
+npm run build
 ```
 
-> Derleme ile ilgili bilinen durum ve güncel hata kayıtları: [docs/DURUM.md](docs/DURUM.md).
-
-## API uç noktaları
-
-| Metot | Yol | Açıklama |
-| --- | --- | --- |
-| GET | `/api/network-info` | LAN IP, portlar ve mobil taban adres |
-| POST | `/api/sessions` | Yeni tarama oturumu (6 haneli kod) oluşturur |
-| GET | `/api/sessions/:id` | Oturum durumunu ve yüklenen fotoğrafları döndürür |
-| POST | `/api/sessions/:id/photo` | Oturuma fotoğraf yükler (`multipart`, alan: `photo`) |
-| POST | `/api/sessions/:id/pointcloud` | Oturuma `.ply` nokta bulutu yükler (alan: `file`) |
-| POST | `/api/reconstruct/cloud` | Bulut AI sağlayıcılarıyla (HuggingFace / fal / Tripo / Meshy) yeniden yapılandırma |
-
-## Klasör yapısı
-
-```
-photo2print-3d/
-├─ index.html                 # Vite giriş HTML'i (tr, dark tema)
-├─ vite.config.ts             # Vite + React + Tailwind eklentileri, /api proxy, port 5173
-├─ tsconfig.json              # src + server + vite.config.ts, strict mod
-├─ src/
-│  ├─ main.tsx                # React kök render
-│  ├─ App.tsx                 # Ana akış: yükleme, görünüm seçimi, dışa aktarma
-│  ├─ index.css               # Tailwind girişi
-│  ├─ components/
-│  │  ├─ ThreeViewport.tsx    # Three.js sahne, malzeme/görünüm modları
-│  │  ├─ MaskEditorModal.tsx  # Arka plan maskesi düzenleme
-│  │  ├─ QrPairingModal.tsx   # Android QR eşleştirme
-│  │  └─ MobileScannerView.tsx# Telefon tarayıcısından fotoğraf çekme akışı
-│  └─ engine/                 # Tarayıcı içi geometri motoru
-│     ├─ maskProcessor.ts     # Maske üretimi/temizleme
-│     ├─ visualHull.ts        # Çoklu görünüm visual hull
-│     ├─ marchingCubes.ts     # Marching Cubes (+ tablolar)
-│     ├─ contourExtrude.ts    # Konturdan ekstrüzyon
-│     ├─ latheRevolve.ts      # Döner simetri (lathe) modeli
-│     ├─ meshRepair.ts        # Manifold onarım, delik kapatma
-│     ├─ plyImporter.ts       # .ply nokta bulutu → ağ
-│     ├─ exporters.ts         # STL / 3MF / OBJ / GLB çıktıları
-│     ├─ types.ts             # Ortak tipler
-│     └─ __tests__/engine.test.ts
-├─ server/
-│  └─ index.ts                # Express API, multer yükleme, oturum yönetimi (port 3001)
-├─ android-scanner/           # ARCore Depth API ile .ply üreten yerel Android projesi
-├─ uploads/                   # Çalışma zamanı verisi (git'e girmez)
-└─ docs/
-   └─ DURUM.md                # Ayrıntılı durum/denetim notları
-```
-
-## Android / mobil notlar
-
-- Masaüstü uygulamasındaki **“Android ile Tara (QR)”** penceresi bir QR kod ve 6 haneli oturum kodu gösterir; telefon aynı Wi-Fi ağında olmalıdır.
-- Telefon tarayıcısı fotoğrafları `<input type="file" capture="environment">` ile çeker; bu yol **HTTPS gerektirmez**, LAN üzerinden `http://<LAN-IP>:5173` yeterlidir. (Kamera akışına `getUserMedia` ile erişen WebXR/AR özellikleri ise güvenli bağlam ister; bu yüzden derinlik taraması için yerel uygulama kullanılır.)
-- Gerçek derinlik/nokta bulutu için `android-scanner` klasöründeki Kotlin projesi Android Studio ile derlenir; ayrıntılar: [android-scanner/README.md](android-scanner/README.md).
-- Telefon ile masaüstü arasında bağlantı kurulamıyorsa Windows güvenlik duvarında 5173 ve 3001 portlarına izin verin.
-
-## Başlatıcı (GUI)
-
-Kurulumu ve sunucuyu elle başlatmak yerine çift tıklanabilir bir başlatıcı vardır:
-
-- **`Photo2Print-Baslat.cmd`** — `start-studio.ps1` GUI'sini açar (PowerShell, kurulum gerekmez).
-- **`start-studio.ps1`** — WPF arayüzü: yuvarlatılmış özel başlık çubuğu (sürüklenebilir), koyu/açık **tema** düğmesi,
-  Başlat / Durdur / Stüdyoyu Aç düğmeleri, 2 sn'de bir port durumu (5173 + 3001), Wi-Fi adresi göstergesi
-  ve pencere kapanınca süreci kapatma.
-- **`install-shortcut.ps1`** — Masaüstüne "Photo2Print 3D Studio" kısayolu oluşturur:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install-shortcut.ps1
-```
-
-## Yayınlama (GitHub)
-
-Uzak depo: https://github.com/mtahiryilmazz/3BStudio (private, `main`)
-
-```bash
-git push -u origin main
-```
-
-`uploads/` ve `.zwork/` klasörleri ile `node_modules/`, `dist/` sürüm kontrolüne dahil edilmez (bkz. `.gitignore`).
+Detaylı mimari kararlar ve sentezlenen ekosistem haritası için [`PLAN.md`](./PLAN.md) dosyasına bakabilirsiniz.

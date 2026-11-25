@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as THREE from 'three';
-import { detectSheetLayout } from '../sheetSplit';
-import { subdivideGeometry } from '../meshRepair';
+import { analyzeSheetCell, detectSheetLayout } from '../sheetSplit';
+import {
+  MAX_TRIANGLES_SOFT,
+  estimateMeshBytes,
+  subdivideGeometry,
+  subdivideWithBudget,
+} from '../meshRepair';
+import { paintHeadFromFace } from '../faceDetect';
 
 class FakeImageData {
   width: number;
@@ -168,3 +174,79 @@ describe('subdivideGeometry', () => {
     expect(copy.getAttribute('position').count / 3).toBe(baseTris);
   });
 });
+
+describe('analyzeSheetCell', () => {
+  it('ten rengi dolu kare dilimi yüz paneli olarak sınıflandırır', () => {
+    const crop = new FakeImageData(180, 160);
+    fill(crop, 10, 10, 160, 140, [205, 152, 120]);
+    const analysis = analyzeSheetCell(crop as unknown as ImageData);
+    expect(analysis.kind).toBe('face');
+    expect(analysis.suggestionReason).toBe('yüz paneli');
+  });
+
+  it('üst bölgede ten rengi bulunan geniş tam boy figürü ön olarak önerir', () => {
+    const crop = new FakeImageData(200, 360);
+    fill(crop, 0, 0, 200, 360, [70, 70, 78]);
+    fill(crop, 65, 20, 70, 70, [205, 152, 120]);
+    const analysis = analyzeSheetCell(crop as unknown as ImageData);
+    expect(analysis.kind).toBe('figure');
+    expect(analysis.suggestedAngle).toBe('front');
+    expect(analysis.suggestionReason).toBe('yüz algılandı');
+  });
+
+  it('dar silüeti sırasıyla sağ ve sol olarak önerir', () => {
+    const crop = new FakeImageData(120, 360);
+    fill(crop, 0, 0, 120, 360, [70, 70, 78]);
+    const first = analyzeSheetCell(crop as unknown as ImageData, 0);
+    const second = analyzeSheetCell(crop as unknown as ImageData, 1);
+    expect(first.suggestedAngle).toBe('right');
+    expect(first.suggestionReason).toBe('dar silüet');
+    expect(second.suggestedAngle).toBe('left');
+    expect(second.suggestionReason).toBe('dar silüet');
+  });
+
+  it('yüzsüz geniş figürü arka olarak önerir', () => {
+    const crop = new FakeImageData(200, 360);
+    fill(crop, 0, 0, 200, 360, [70, 70, 78]);
+    const analysis = analyzeSheetCell(crop as unknown as ImageData);
+    expect(analysis.suggestedAngle).toBe('back');
+    expect(analysis.suggestionReason).toBe('yüz yok');
+  });
+});
+
+describe('subdivideWithBudget & estimateMeshBytes', () => {
+  it('bütçe aşıldığında güvenli geçiş sayısında kırpar (clamped)', () => {
+    const base = new THREE.BoxGeometry(10, 10, 10); // 12 üçgen
+    const res = subdivideWithBudget(base, 3, 100);
+    expect(res.appliedLevels).toBe(1);
+    expect(res.triangles).toBe(48);
+    expect(res.clamped).toBe(true);
+    expect(MAX_TRIANGLES_SOFT).toBe(750_000);
+  });
+
+  it('STL ve GLB tahmini bayt hesabını doğru verir', () => {
+    const est = estimateMeshBytes(1_000_000);
+    expect(est.stlBytes).toBe(50_000_084);
+    expect(est.glbBytes).toBe(88_004_096);
+  });
+
+  it('paintHeadFromFace sonrası subdivideWithBudget renk özniteliğini korur', () => {
+    const base = new THREE.BoxGeometry(20, 40, 20);
+    const face = new FakeImageData(64, 64);
+    fill(face, 0, 0, 64, 64, [230, 160, 120]);
+    const painted = paintHeadFromFace(base, face as unknown as ImageData);
+    const sub = subdivideWithBudget(painted, 1, 10_000);
+    const colorAttr = sub.geometry.getAttribute('color') as THREE.BufferAttribute;
+    expect(colorAttr).toBeTruthy();
+    expect(colorAttr.count).toBe((sub.geometry.getAttribute('position') as THREE.BufferAttribute).count);
+    let hasFaceTint = false;
+    for (let i = 0; i < colorAttr.count; i++) {
+      if (colorAttr.getX(i) > 0.85 && colorAttr.getY(i) > 0.55) {
+        hasFaceTint = true;
+        break;
+      }
+    }
+    expect(hasFaceTint).toBe(true);
+  });
+});
+

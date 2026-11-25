@@ -1,11 +1,27 @@
 <!doctype html>
-<html lang="tr" class="dark">
+<html lang="tr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Photo2Print 3D Studio — Fotoğraftan 3D Baskı Stüdyosu</title>
+    <title>3BStudio — Yerel 3B Mesh, Poligon ve Rig Stüdyosu</title>
+    <meta name="description" content="Oyun karakteri, mekanik ve mimari 3B model üretimi, fotoğraftan 3B rekonstrüksiyon, manuel poligon artırma, otomatik iskelet rig/skinning ve GLB/OBJ/STL dışa aktarımı sunan yerel 3B stüdyo." />
+    <meta property="og:title" content="3BStudio — Yerel 3B Mesh, Poligon ve Rig Stüdyosu" />
+    <meta property="og:description" content="Oyun karakteri, mekanik ve mimari 3B model üretimi, fotoğraftan 3B rekonstrüksiyon, manuel poligon artırma, otomatik iskelet rig/skinning ve GLB/OBJ/STL dışa aktarımı sunan yerel 3B stüdyo." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('3bstudio_theme');
+          if (saved === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-100">
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased selection:bg-teal-500/20 selection:text-teal-900 dark:selection:text-teal-100">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

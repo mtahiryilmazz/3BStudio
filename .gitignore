@@ -1,6 +1,11 @@
 node_modules/
+build/
 dist/
+coverage/
 uploads/
-.zwork/
-*.local
-
+output/
+.DS_Store
+*.log
+.env*
+!.env.example
+.aistudio/
