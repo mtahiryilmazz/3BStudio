@@ -3,6 +3,7 @@ import cors from 'cors';
 import multer from 'multer';
 import os from 'node:os';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -1911,11 +1912,16 @@ async function startServer() {
     }
   });
 
+  const httpServer = http.createServer(app);
+
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       configLoader: 'native',
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ws: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -1927,7 +1933,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     const lanIp = getLanIp();
     console.log(`3BStudio API & UI hazir: http://localhost:${PORT} (LAN: http://${lanIp}:${PORT})`);
   });

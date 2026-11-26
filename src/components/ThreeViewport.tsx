@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -103,6 +103,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const autoRotateRef = useRef(autoRotate);
   const softwareGlRef = useRef(false);
+  const [webglError, setWebglError] = useState<string | null>(null);
 
   useEffect(() => {
     autoRotateRef.current = autoRotate;
@@ -135,7 +136,15 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     const isSoftwareGl = /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(glRenderer);
     softwareGlRef.current = isSoftwareGl;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: !isSoftwareGl, preserveDrawingBuffer: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: !isSoftwareGl, preserveDrawingBuffer: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'WebGL bağlamı başlatılamadı.';
+      setWebglError(msg);
+      return;
+    }
+    setWebglError(null);
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -784,7 +793,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
         </div>
 
         {/* Empty State */}
-        {!geometry && !isBusy && (
+        {!geometry && !isBusy && !webglError && (
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center text-center p-6">
             <div className="bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 rounded-xl px-6 py-5 max-w-md shadow-sm">
               <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1.5">
@@ -795,6 +804,23 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
                 <strong className="text-slate-900 dark:text-teal-300">Karakter Sheet</strong> /{' '}
                 <strong className="text-slate-900 dark:text-teal-300">Örnek Parça</strong> seçip
                 2K PBR 3D modelinizi oluşturun.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* WebGL Unavailable Fallback */}
+        {webglError && (
+          <div className="absolute inset-0 z-20 bg-slate-100/95 dark:bg-slate-950/95 flex items-center justify-center p-6 text-center">
+            <div className="max-w-md bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700/70 rounded-xl px-6 py-5 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1.5">
+                3D WebGL Önizleme Kullanılamıyor
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-2">
+                Tarayıcı veya grafik sürücüsü WebGL bağlamı oluşturamadı. Donanım hızlandırmayı etkinleştirip sayfayı yenileyebilir veya diğer stüdyo araçlarını kullanmaya devam edebilirsiniz.
+              </p>
+              <p className="text-[11px] font-mono text-amber-700 dark:text-amber-300 break-words">
+                {webglError}
               </p>
             </div>
           </div>

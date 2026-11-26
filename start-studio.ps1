@@ -1,4 +1,8 @@
-﻿param([int]$Port = 3000)
+﻿param(
+    [int]$Port = 3000,
+    [switch]$NoAutoStart,
+    [switch]$NoBrowser
+)
 
 # 3BStudio local launcher. It is intentionally self-contained: Windows PowerShell + WPF only.
 $ErrorActionPreference = 'Stop'
@@ -10,6 +14,25 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Net.Http
+
+if (-not ('StudioLogBridge' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+public static class StudioLogBridge {
+    public static void Attach(Process proc, ConcurrentQueue<string> queue) {
+        proc.OutputDataReceived += (s, e) => {
+            if (!string.IsNullOrEmpty(e.Data)) queue.Enqueue(e.Data);
+        };
+        proc.ErrorDataReceived += (s, e) => {
+            if (!string.IsNullOrEmpty(e.Data)) queue.Enqueue(e.Data);
+        };
+    }
+}
+'@ -ErrorAction Stop
+}
 
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -177,8 +200,10 @@ $btnClear = Find 'BtnClear'
 $logBox = Find 'LogBox'
 
 $script:process = $null
+$script:installProcess = $null
 $script:ownsProcess = $false
 $script:ready = $false
+$script:autoOpenedBrowser = $false
 $script:lanUrl = $null
 $script:healthTask = $null
 $script:nextHealthCheck = [DateTime]::UtcNow
@@ -186,6 +211,21 @@ $script:lastProcessExit = $null
 $script:logQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
 $script:httpClient = [System.Net.Http.HttpClient]::new()
 $script:httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+
+function Open-StudioUrl {
+    try {
+        Start-Process $studioUrl | Out-Null
+        return $true
+    } catch {
+        try {
+            Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'start', '""', $studioUrl) -WindowStyle Hidden | Out-Null
+            return $true
+        } catch {
+            Write-Log "Tarayıcı açma uyarısı: $($_.Exception.Message)"
+            return $false
+        }
+    }
+}
 
 function Write-Log([string]$message) {
     if ([string]::IsNullOrWhiteSpace($message)) { return }
@@ -232,13 +272,22 @@ function Complete-HealthCheck {
             } else {
                 Set-State 'ready' '3BStudio zaten çalışıyor' "Mevcut sunucu algılandı · $studioUrl"
             }
+            if (-not $NoBrowser -and -not $script:autoOpenedBrowser) {
+                $script:autoOpenedBrowser = $true
+                if (Open-StudioUrl) {
+                    Write-Log "Web portalı tarayıcıda açıldı: $studioUrl"
+                }
+            }
         } else {
             $script:ready = $false
-            $btnStart.IsEnabled = ($null -eq $script:process)
-            $btnStop.IsEnabled = $script:ownsProcess -and ($null -ne $script:process)
+            $isBusy = ($null -ne $script:process) -or ($null -ne $script:installProcess)
+            $btnStart.IsEnabled = (-not $isBusy)
+            $btnStop.IsEnabled = ($null -ne $script:installProcess) -or ($script:ownsProcess -and ($null -ne $script:process))
             $btnOpen.IsEnabled = $false
             $lanText.Text = 'Sunucu başlatılınca gösterilecek'
-            if ($script:ownsProcess) {
+            if ($null -ne $script:installProcess) {
+                Set-State 'starting' 'Bağımlılıklar kuruluyor…' 'npm install tamamlanınca sunucu otomatik başlatılacak.'
+            } elseif ($script:ownsProcess) {
                 Set-State 'starting' 'Sunucu başlatılıyor…' 'Yerel sunucu yanıt verdiğinde portal açılabilir olacak.'
             } else {
                 Set-State 'off' 'Sunucu kapalı' 'Başlat düğmesi sunucuyu bu bilgisayarda açar.'
@@ -246,34 +295,23 @@ function Complete-HealthCheck {
         }
     } catch {
         $script:ready = $false
-        $btnStart.IsEnabled = ($null -eq $script:process)
-        $btnStop.IsEnabled = $script:ownsProcess -and ($null -ne $script:process)
+        $isBusy = ($null -ne $script:process) -or ($null -ne $script:installProcess)
+        $btnStart.IsEnabled = (-not $isBusy)
+        $btnStop.IsEnabled = ($null -ne $script:installProcess) -or ($script:ownsProcess -and ($null -ne $script:process))
         $btnOpen.IsEnabled = $false
-        if ($script:ownsProcess) { Set-State 'starting' 'Sunucu başlatılıyor…' 'Başlangıç sürerken bu pencere kullanılabilir.' }
+        if ($null -ne $script:installProcess) { Set-State 'starting' 'Bağımlılıklar kuruluyor…' 'npm install tamamlanınca sunucu otomatik başlatılacak.' }
+        elseif ($script:ownsProcess) { Set-State 'starting' 'Sunucu başlatılıyor…' 'Başlangıç sürerken bu pencere kullanılabilir.' }
         elseif ($script:lastProcessExit -ne $null) { Set-State 'error' 'Sunucu başlatılamadı' "Çıkış kodu: $($script:lastProcessExit). Günlükte ayrıntılar var." }
         else { Set-State 'off' 'Sunucu kapalı' 'Başlat düğmesi sunucuyu bu bilgisayarda açar.' }
     } finally {
         if ($response) { $response.Dispose() }
-        $script:healthTask.Dispose()
+        if ($script:healthTask -and $script:healthTask.IsCompleted) { $script:healthTask.Dispose() }
         $script:healthTask = $null
     }
 }
 
-function Start-StudioServer {
+function Start-StudioServerProcess {
     if ($script:process -or $script:ready) { return }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        $script:lastProcessExit = 'npm bulunamadı'
-        Write-Log 'Node.js ve npm bulunamadı. Node.js 20 veya üstünü kurup yeniden deneyin.'
-        Set-State 'error' 'Node.js / npm bulunamadı' 'Başlatıcı çevrimdışı çalışır; sunucuyu başlatmak için Node.js kurulmalıdır.'
-        return
-    }
-    if (-not (Test-Path (Join-Path $rootDir 'node_modules'))) {
-        $script:lastProcessExit = 'bağımlılıklar eksik'
-        Write-Log 'node_modules bulunamadı. İnternet gerektirmeyen kullanım için bağımlılıkları önceden kurun.'
-        Set-State 'error' 'Bağımlılıklar kurulu değil' 'İlk kurulum için npm install çalıştırın; sonraki yerel açılışlar çevrimdışıdır.'
-        return
-    }
-
     $script:lastProcessExit = $null
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $env:ComSpec
@@ -289,8 +327,7 @@ function Start-StudioServer {
     try {
         $script:process = [System.Diagnostics.Process]::new()
         $script:process.StartInfo = $psi
-        $script:process.add_OutputDataReceived({ if ($_.Data) { $script:logQueue.Enqueue($_.Data) } })
-        $script:process.add_ErrorDataReceived({ if ($_.Data) { $script:logQueue.Enqueue($_.Data) } })
+        [StudioLogBridge]::Attach($script:process, $script:logQueue)
         if (-not $script:process.Start()) { throw 'Sunucu süreci başlatılamadı.' }
         $script:ownsProcess = $true
         $script:process.BeginOutputReadLine()
@@ -311,7 +348,83 @@ function Start-StudioServer {
     }
 }
 
+function Start-StudioServer {
+    if ($script:process -or $script:installProcess -or $script:ready) { return }
+
+    $probeClient = [System.Net.Http.HttpClient]::new()
+    $probeClient.Timeout = [TimeSpan]::FromMilliseconds(400)
+    try {
+        $probe = $probeClient.GetAsync("$apiUrl/api/network-info").GetAwaiter().GetResult()
+        $alreadyUp = $probe.IsSuccessStatusCode
+        $probe.Dispose()
+        if ($alreadyUp) {
+            Write-Log "Port $Port üzerinde çalışan 3BStudio sunucusu algılandı."
+            $script:nextHealthCheck = [DateTime]::UtcNow
+            return
+        }
+    } catch {
+    } finally {
+        $probeClient.Dispose()
+    }
+
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        $script:lastProcessExit = 'npm bulunamadı'
+        Write-Log 'Node.js ve npm bulunamadı. Node.js 20 veya üstünü kurup yeniden deneyin.'
+        Set-State 'error' 'Node.js / npm bulunamadı' 'Başlatıcı çevrimdışı çalışır; sunucuyu başlatmak için Node.js kurulmalıdır.'
+        return
+    }
+
+    $tsxCmd = Join-Path $rootDir 'node_modules\.bin\tsx.cmd'
+    if (-not (Test-Path $tsxCmd)) {
+        $script:lastProcessExit = $null
+        $psiInstall = [System.Diagnostics.ProcessStartInfo]::new()
+        $psiInstall.FileName = $env:ComSpec
+        $psiInstall.Arguments = '/d /s /c "npm install"'
+        $psiInstall.WorkingDirectory = $rootDir
+        $psiInstall.UseShellExecute = $false
+        $psiInstall.CreateNoWindow = $true
+        $psiInstall.RedirectStandardOutput = $true
+        $psiInstall.RedirectStandardError = $true
+        $psiInstall.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $psiInstall.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+        try {
+            $script:installProcess = [System.Diagnostics.Process]::new()
+            $script:installProcess.StartInfo = $psiInstall
+            [StudioLogBridge]::Attach($script:installProcess, $script:logQueue)
+            if (-not $script:installProcess.Start()) { throw 'npm install süreci başlatılamadı.' }
+            $script:installProcess.BeginOutputReadLine()
+            $script:installProcess.BeginErrorReadLine()
+            $btnStart.IsEnabled = $false
+            $btnStop.IsEnabled = $true
+            $btnOpen.IsEnabled = $false
+            Set-State 'starting' 'Bağımlılıklar kuruluyor…' 'İlk kurulum için npm install çalıştırılıyor…'
+            Write-Log "Bağımlılıklar eksik; npm install başlatıldı (PID $($script:installProcess.Id))."
+        } catch {
+            if ($script:installProcess) { $script:installProcess.Dispose(); $script:installProcess = $null }
+            $script:lastProcessExit = 'npm install başlatma hatası'
+            $btnStart.IsEnabled = $true
+            $btnStop.IsEnabled = $false
+            Write-Log "npm install hatası: $($_.Exception.Message)"
+            Set-State 'error' 'Bağımlılıklar kurulamadı' 'Ayrıntılar sunucu günlüğünde gösteriliyor.'
+        }
+        return
+    }
+
+    Start-StudioServerProcess
+}
+
 function Stop-StudioServer {
+    if ($script:installProcess -and -not $script:installProcess.HasExited) {
+        $installPid = $script:installProcess.Id
+        try {
+            Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID', "$installPid", '/T', '/F') -WindowStyle Hidden | Out-Null
+            Write-Log 'Bağımlılık kurulumu kullanıcı tarafından durduruldu…'
+        } catch { Write-Log "Durdurma uyarısı: $($_.Exception.Message)" }
+        $btnStop.IsEnabled = $false
+        Set-State 'starting' 'Kurulum durduruluyor…' 'Süreç kapanınca durum otomatik güncellenecek.'
+        return
+    }
     if (-not $script:process -or -not $script:ownsProcess) { return }
     $pidToStop = $script:process.Id
     try {
@@ -336,7 +449,11 @@ $titleBar.Add_MouseLeftButtonDown({
 (Find 'CloseBtn').Add_Click({ $window.Close() })
 $btnStart.Add_Click({ Start-StudioServer })
 $btnStop.Add_Click({ Stop-StudioServer })
-$btnOpen.Add_Click({ if ($script:ready) { Start-Process $studioUrl } })
+$btnOpen.Add_Click({
+    if ($script:ready -and (Open-StudioUrl)) {
+        Write-Log "Web portalı tarayıcıda açıldı: $studioUrl"
+    }
+})
 $btnCopy.Add_Click({
     if ($script:lanUrl) {
         [Windows.Clipboard]::SetText($script:lanUrl)
@@ -350,6 +467,23 @@ $script:timer.Interval = [TimeSpan]::FromMilliseconds(200)
 $script:timer.Add_Tick({
     $line = $null
     while ($script:logQueue.TryDequeue([ref]$line)) { Write-Log $line; $line = $null }
+
+    if ($script:installProcess -and $script:installProcess.HasExited) {
+        $installExit = $script:installProcess.ExitCode
+        $script:installProcess.Dispose()
+        $script:installProcess = $null
+        if ($installExit -eq 0 -and (Test-Path (Join-Path $rootDir 'node_modules\.bin\tsx.cmd'))) {
+            Write-Log 'npm install başarıyla tamamlandı. Sunucu başlatılıyor…'
+            Start-StudioServerProcess
+        } else {
+            $script:lastProcessExit = "npm install ($installExit)"
+            $btnStop.IsEnabled = $false
+            $btnOpen.IsEnabled = $false
+            $btnStart.IsEnabled = $true
+            Set-State 'error' 'Bağımlılık kurulumu başarısız' "npm install çıkış kodu: $installExit. Günlüğü inceleyin."
+            Write-Log "npm install başarısız oldu (çıkış kodu $installExit)."
+        }
+    }
 
     if ($script:process -and $script:process.HasExited) {
         $script:lastProcessExit = $script:process.ExitCode
@@ -372,13 +506,24 @@ $script:timer.Add_Tick({
 
 $window.Add_Closed({
     $script:timer.Stop()
-    if ($script:healthTask) { $script:healthTask.Dispose() }
+    if ($script:healthTask -and $script:healthTask.IsCompleted) { $script:healthTask.Dispose() }
+    $script:healthTask = $null
     $script:httpClient.Dispose()
+    if ($script:installProcess -and -not $script:installProcess.HasExited) {
+        Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID', "$($script:installProcess.Id)", '/T', '/F') -WindowStyle Hidden | Out-Null
+    }
+    if ($script:installProcess) { $script:installProcess.Dispose(); $script:installProcess = $null }
     if ($script:process -and $script:ownsProcess -and -not $script:process.HasExited) {
         Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID', "$($script:process.Id)", '/T', '/F') -WindowStyle Hidden | Out-Null
     }
-    if ($script:process) { $script:process.Dispose() }
+    if ($script:process) { $script:process.Dispose(); $script:process = $null }
 })
+
+if (-not $NoAutoStart) {
+    $window.Add_ContentRendered({
+        Start-StudioServer
+    })
+}
 
 Write-Log "3BStudio başlatıcısı hazır · $studioUrl"
 $script:timer.Start()

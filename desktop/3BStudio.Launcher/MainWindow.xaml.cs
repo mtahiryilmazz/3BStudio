@@ -17,14 +17,52 @@ public partial class MainWindow : Window
     private Process? _serverProcess;
     private string? _repoRoot;
     private bool _webViewInitialized;
+    private bool _webViewEventsHooked;
     private bool _serverReady;
+    private bool _noBrowser;
+    private bool _autoOpenedBrowserFallback;
+    private bool _browserFallbackActive;
+    private bool _isClosing;
     private int _activePort = 3000;
 
     public MainWindow()
     {
         InitializeComponent();
+        InitializeInitialPort();
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
+    }
+
+    private void InitializeInitialPort()
+    {
+        var args = Environment.GetCommandLineArgs();
+        string? candidate = null;
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (string.Equals(args[i], "--no-browser", StringComparison.OrdinalIgnoreCase))
+            {
+                _noBrowser = true;
+                continue;
+            }
+            if (args[i].StartsWith("--port=", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate = args[i]["--port=".Length..];
+                continue;
+            }
+            if (string.Equals(args[i], "--port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                candidate = args[i + 1];
+                i++;
+                continue;
+            }
+        }
+
+        candidate ??= Environment.GetEnvironmentVariable("PORT");
+        if (int.TryParse(candidate?.Trim(), out var parsed) && parsed >= 1024 && parsed <= 65535)
+        {
+            _activePort = parsed;
+            PortTextBox.Text = parsed.ToString();
+        }
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -52,6 +90,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        _isClosing = true;
         StopServerProcess();
         _http.Dispose();
     }
@@ -97,6 +136,12 @@ public partial class MainWindow : Window
 
     private string LocalUrl => $"http://localhost:{_activePort}";
     private string LocalLoopbackUrl => $"http://127.0.0.1:{_activePort}";
+    private string HealthProbeUrl => $"{LocalLoopbackUrl}/api/network-info";
+
+    private bool HasInstalledDependencies() =>
+        _repoRoot != null &&
+        Directory.Exists(Path.Combine(_repoRoot, "node_modules")) &&
+        File.Exists(Path.Combine(_repoRoot, "node_modules", ".bin", "tsx.cmd"));
 
     private string GetLanUrl()
     {
@@ -134,7 +179,7 @@ public partial class MainWindow : Window
             NodeStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#DC2626"));
         }
 
-        if (_repoRoot != null && Directory.Exists(Path.Combine(_repoRoot, "node_modules")))
+        if (HasInstalledDependencies())
         {
             DepsStatusText.Text = "Hazır (node_modules)";
             DepsStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#16A34A"));
@@ -157,20 +202,62 @@ public partial class MainWindow : Window
             ComfyStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#64748B"));
         }
 
-        var serverUp = await ProbeHttpAsync(LocalLoopbackUrl);
+        if (TryGetWebView2Version(out var webViewVersion))
+        {
+            WebView2StatusText.Text = $"Hazır (v{webViewVersion})";
+            WebView2StatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#16A34A"));
+        }
+        else
+        {
+            WebView2StatusText.Text = "Yok — Tarayıcı modu aktif";
+            WebView2StatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D97706"));
+        }
+
+        var serverUp = await ProbeHttpAsync(HealthProbeUrl, requireSuccess: true);
         _serverReady = serverUp;
         UpdateServerUiState(serverUp);
+    }
+
+    private static string? GetConfiguredWebView2Folder()
+    {
+        var folder = Environment.GetEnvironmentVariable("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER");
+        return string.IsNullOrWhiteSpace(folder) ? null : folder.Trim();
+    }
+
+    private static bool TryGetWebView2Version(out string? version)
+    {
+        version = null;
+        try
+        {
+            var browserFolder = GetConfiguredWebView2Folder();
+            var v = CoreWebView2Environment.GetAvailableBrowserVersionString(browserFolder);
+            if (!string.IsNullOrWhiteSpace(v))
+            {
+                version = v.Trim();
+                return true;
+            }
+            return false;
+        }
+        catch
+        {
+            version = null;
+            return false;
+        }
     }
 
     private void UpdateServerUiState(bool running)
     {
         if (running)
         {
-            SetStatus($"Çalışıyor · :{ _activePort }", "#22C55E");
+            var statusLabel = _browserFallbackActive
+                ? $"Tarayıcıda Açık · :{_activePort}"
+                : $"Çalışıyor · :{_activePort}";
+            SetStatus(statusLabel, "#22C55E");
             BtnToggleServer.Content = "Sunucuyu Durdur";
         }
         else
         {
+            _browserFallbackActive = false;
             SetStatus("Durduruldu", "#94A3B8");
             BtnToggleServer.Content = "Sunucuyu Başlat";
         }
@@ -178,8 +265,16 @@ public partial class MainWindow : Window
 
     private void SetStatus(string text, string hexColor)
     {
-        Dispatcher.Invoke(() =>
+        if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (Dispatcher.CheckAccess())
         {
+            StatusText.Text = text;
+            StatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor));
+            return;
+        }
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
             StatusText.Text = text;
             StatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor));
         });
@@ -187,8 +282,20 @@ public partial class MainWindow : Window
 
     private void AppendLog(string line)
     {
-        Dispatcher.Invoke(() =>
+        if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (Dispatcher.CheckAccess())
         {
+            ConsoleOutputBox.AppendText(line + Environment.NewLine);
+            if (ConsoleOutputBox.Text.Length > 80_000)
+            {
+                ConsoleOutputBox.Text = ConsoleOutputBox.Text[^50_000..];
+            }
+            ConsoleOutputBox.ScrollToEnd();
+            return;
+        }
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
             ConsoleOutputBox.AppendText(line + Environment.NewLine);
             if (ConsoleOutputBox.Text.Length > 80_000)
             {
@@ -198,12 +305,14 @@ public partial class MainWindow : Window
         });
     }
 
-    private async Task<bool> ProbeHttpAsync(string url)
+    private async Task<bool> ProbeHttpAsync(string url, bool requireSuccess = false)
     {
         try
         {
             using var resp = await _http.GetAsync(url);
-            return (int)resp.StatusCode >= 200 && (int)resp.StatusCode < 500;
+            return requireSuccess
+                ? resp.IsSuccessStatusCode
+                : (int)resp.StatusCode >= 200 && (int)resp.StatusCode < 500;
         }
         catch
         {
@@ -275,7 +384,7 @@ public partial class MainWindow : Window
     private async Task<bool> EnsureServerRunningAsync()
     {
         ReadSelectedPort();
-        if (await ProbeHttpAsync(LocalLoopbackUrl))
+        if (await ProbeHttpAsync(HealthProbeUrl, requireSuccess: true))
         {
             _serverReady = true;
             UpdateServerUiState(true);
@@ -289,7 +398,7 @@ public partial class MainWindow : Window
         }
 
         // İlk klonlamada node_modules yoksa otomatik kur
-        if (!Directory.Exists(Path.Combine(_repoRoot, "node_modules")))
+        if (!HasInstalledDependencies())
         {
             var okInstall = await RunNpmInstallAsync();
             if (!okInstall) return false;
@@ -320,7 +429,8 @@ public partial class MainWindow : Window
         _serverProcess.Exited += (_, _) =>
         {
             _serverReady = false;
-            Dispatcher.Invoke(() => UpdateServerUiState(false));
+            if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            Dispatcher.BeginInvoke(() => UpdateServerUiState(false));
             AppendLog("[3BStudio] Yerel sunucu durduruldu.");
         };
 
@@ -345,7 +455,7 @@ public partial class MainWindow : Window
                 SetStatus("Sunucu beklenmedik şekilde kapandı", "#DC2626");
                 return false;
             }
-            if (await ProbeHttpAsync(LocalLoopbackUrl))
+            if (await ProbeHttpAsync(HealthProbeUrl, requireSuccess: true))
             {
                 _serverReady = true;
                 UpdateServerUiState(true);
@@ -395,12 +505,110 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task OpenDesktopGuiAsync()
+    private bool OpenBrowserUrl(string url)
     {
-        DashboardPanel.Visibility = Visibility.Collapsed;
-        DesktopGuiPanel.Visibility = Visibility.Visible;
-        WebViewLoadingOverlay.Visibility = Visibility.Visible;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+            return true;
+        }
+        catch (Exception primaryEx)
+        {
+            AppendLog($"[UYARI] Doğrudan tarayıcı başlatılamadı ({primaryEx.Message}), cmd start deneniyor...");
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c start \"\" \"{url}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                return true;
+            }
+            catch (Exception fallbackEx)
+            {
+                AppendLog($"[HATA] Tarayıcı açılamadı: {fallbackEx.Message}");
+                return false;
+            }
+        }
+    }
 
+    private void FallbackToBrowser(string reason, bool forceOpen = false)
+    {
+        WebViewLoadingOverlay.Visibility = Visibility.Collapsed;
+        DesktopGuiPanel.Visibility = Visibility.Collapsed;
+        DashboardPanel.Visibility = Visibility.Visible;
+        _browserFallbackActive = true;
+        UpdateServerUiState(_serverReady);
+
+        AppendLog($"[UYARI] {reason} Web Portalı varsayılan tarayıcıda açılıyor...");
+
+        if (_noBrowser && !forceOpen)
+        {
+            AppendLog($"[3BStudio] --no-browser etkin; otomatik tarayıcı açma atlandı. Portal adresi: {LocalUrl}");
+            return;
+        }
+
+        if (forceOpen || !_autoOpenedBrowserFallback)
+        {
+            _autoOpenedBrowserFallback = true;
+            if (OpenBrowserUrl(LocalUrl))
+            {
+                AppendLog($"[3BStudio] Web Portalı varsayılan tarayıcıda açıldı: {LocalUrl}");
+            }
+        }
+    }
+
+    private async Task InitializeWebViewEnvironmentAsync()
+    {
+        var browserFolder = GetConfiguredWebView2Folder();
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var sharedUserDataDir = Path.Combine(localAppData, "3BStudio", "WebView2");
+
+        try
+        {
+            var env = await CoreWebView2Environment.CreateAsync(browserFolder, sharedUserDataDir);
+            await StudioWebView.EnsureCoreWebView2Async(env);
+        }
+        catch (Exception primaryEx)
+        {
+            AppendLog($"[UYARI] Paylaşılan WebView2 profili açılamadı ({primaryEx.Message}); izole profil deneniyor...");
+            var isolatedUserDataDir = Path.Combine(localAppData, "3BStudio", $"WebView2-{_activePort}-{Environment.ProcessId}");
+            Directory.CreateDirectory(isolatedUserDataDir);
+            var fallbackEnv = await CoreWebView2Environment.CreateAsync(browserFolder, isolatedUserDataDir);
+            await StudioWebView.EnsureCoreWebView2Async(fallbackEnv);
+        }
+    }
+
+    private void CoreWebView2_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            WebViewLoadingOverlay.Visibility = Visibility.Collapsed;
+            if (!e.IsSuccess && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
+            {
+                FallbackToBrowser($"WebView2 sayfa yüklemesi başarısız ({e.WebErrorStatus});");
+            }
+        });
+    }
+
+    private void CoreWebView2_ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _webViewInitialized = false;
+            _webViewEventsHooked = false;
+            FallbackToBrowser($"WebView2 işlemi beklenmedik şekilde sonlandı ({e.ProcessFailedKind});");
+        });
+    }
+
+    private async Task OpenDesktopGuiAsync(bool userInitiated = false)
+    {
         var ok = await EnsureServerRunningAsync();
         if (!ok)
         {
@@ -410,44 +618,56 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!TryGetWebView2Version(out _))
+        {
+            FallbackToBrowser("WebView2 Runtime bulunamadı veya başlatılamadı;", forceOpen: userInitiated);
+            return;
+        }
+
+        DashboardPanel.Visibility = Visibility.Collapsed;
+        DesktopGuiPanel.Visibility = Visibility.Visible;
+        WebViewLoadingOverlay.Visibility = Visibility.Visible;
+
         try
         {
             if (!_webViewInitialized)
             {
-                var userDataDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "3BStudio",
-                    "WebView2"
-                );
-                var env = await CoreWebView2Environment.CreateAsync(null, userDataDir);
-                await StudioWebView.EnsureCoreWebView2Async(env);
+                await InitializeWebViewEnvironmentAsync();
                 StudioWebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 StudioWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
                 StudioWebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                if (!_webViewEventsHooked)
+                {
+                    StudioWebView.CoreWebView2.NavigationCompleted += CoreWebView2_NavigationCompleted;
+                    StudioWebView.CoreWebView2.ProcessFailed += CoreWebView2_ProcessFailed;
+                    _webViewEventsHooked = true;
+                }
                 _webViewInitialized = true;
             }
 
-            StudioWebView.Source = new Uri(LocalUrl);
-            WebViewLoadingOverlay.Visibility = Visibility.Collapsed;
+            _browserFallbackActive = false;
+            UpdateServerUiState(_serverReady);
+
+            var targetUri = new Uri(LocalUrl);
+            if (StudioWebView.Source != null &&
+                Uri.Compare(StudioWebView.Source, targetUri, UriComponents.AbsoluteUri, UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                WebViewLoadingOverlay.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                StudioWebView.Source = targetUri;
+            }
         }
         catch (Exception ex)
         {
-            WebViewLoadingOverlay.Visibility = Visibility.Collapsed;
-            DashboardPanel.Visibility = Visibility.Visible;
-            DesktopGuiPanel.Visibility = Visibility.Collapsed;
-            AppendLog($"[UYARI] WebView2 başlatılamadı: {ex.Message}");
-            MessageBox.Show(
-                "Microsoft Edge WebView2 Runtime bulunamadı veya başlatılamadı.\nWeb Portalı butonunu kullanarak tarayıcıdan devam edebilir veya WebView2 Runtime kurabilirsiniz.",
-                "WebView2 Uyarısı",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning
-            );
+            FallbackToBrowser($"WebView2 başlatılamadı ({ex.Message});", forceOpen: userInitiated);
         }
     }
 
     private async void BtnShowDesktopGui_Click(object sender, RoutedEventArgs e)
     {
-        await OpenDesktopGuiAsync();
+        await OpenDesktopGuiAsync(userInitiated: true);
     }
 
     private async void BtnOpenBrowser_Click(object sender, RoutedEventArgs e)
@@ -455,18 +675,9 @@ public partial class MainWindow : Window
         var ok = await EnsureServerRunningAsync();
         if (!ok) return;
 
-        try
+        if (OpenBrowserUrl(LocalUrl))
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = LocalUrl,
-                UseShellExecute = true,
-            });
             AppendLog($"[3BStudio] Web Portalı varsayılan tarayıcıda açıldı: {LocalUrl}");
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"[HATA] Tarayıcı açılamadı: {ex.Message}");
         }
     }
 
